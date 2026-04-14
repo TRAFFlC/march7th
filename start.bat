@@ -2,23 +2,25 @@
 chcp 65001 >nul
 title 七音盒 Music7ox
 
+cd /d "%~dp0"
+
+set "PROJECT_ROOT=%cd%"
+
 echo ========================================
 echo    七音盒 Music7ox - 一键启动
 echo ========================================
 echo.
 
-cd /d "%~dp0"
-
 echo [1/3] 启动后端服务...
-start "Music7ox-Backend" cmd /k "python -m api.main"
+start "Music7ox-Backend" cmd /k "cd /d \"%PROJECT_ROOT%\" && python -m api.main"
 timeout /t 3 /nobreak >nul
 
 echo [2/3] 启动前端服务...
-start "Music7ox-Frontend" cmd /k "cd frontend && npm run dev"
+start "Music7ox-Frontend" cmd /k "cd /d \"%PROJECT_ROOT%\frontend\" && npm run dev"
 timeout /t 2 /nobreak >nul
 
 echo [3/3] 启动桌宠...
-start "Music7ox-DesktopPet" cmd /k "cd desktop_pet && npm start"
+start "Music7ox-DesktopPet" cmd /k "cd /d \"%PROJECT_ROOT%\desktop_pet\" && npm start"
 
 echo.
 echo ========================================
