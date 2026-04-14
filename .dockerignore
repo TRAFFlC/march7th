@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Node.js / Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Build outputs
+frontend/dist/
+*.local
+
+# Test files
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Development files
+*.md
+!README.md
+.trae/
+*.txt
+!requirements.txt
+
+# Logs
+logs/
+*.log
+
+# Database files (local development)
+*.db
+*.sqlite3
+data/
+persona_db/
+rag_db/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Docker files (prevent recursive copy)
+docker-compose*.yml
+Dockerfile*
+.docker/
+
+# Misc
+*.pid
+*.seed
+*.pid.lock

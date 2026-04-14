@@ -1,0 +1,130 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: march7th-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-march7th_root_password}
+      MYSQL_DATABASE: march7th_chat
+      MYSQL_USER: ${MYSQL_USER:-march7th}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-march7th_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-march7th_root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - march7th-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: march7th-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER:-march7th}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-march7th_password}
+      - MYSQL_DATABASE=march7th_chat
+      - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal:11434}
+      - GPT_SOVITS_DIR=${GPT_SOVITS_DIR:-/app/gpt-sovits}
+      - JWT_SECRET=${JWT_SECRET:-march7th_jwt_secret_key_2024_very_secure}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./persona_db:/app/persona_db
+      - ./rag_db:/app/rag_db
+      - ./config:/app/config:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - march7th-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: march7th-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    networks:
+      - march7th-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: march7th-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - march7th-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  gpt-sovits:
+    image: breakstring/gpt-sovits:latest
+    container_name: march7th-gpt-sovits
+    restart: unless-stopped
+    profiles:
+      - tts
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./gpt-sovits-models:/app/models
+    ports:
+      - "9880:9880"
+    networks:
+      - march7th-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  march7th-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  ollama_data:
+    driver: local

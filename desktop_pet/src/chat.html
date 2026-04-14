@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>七音盒 - 聊天</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Microsoft YaHei', -apple-system, sans-serif;
+      background: linear-gradient(135deg, rgba(30, 30, 50, 0.95) 0%, rgba(45, 45, 70, 0.95) 100%);
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 16px;
+    }
+
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(233, 69, 96, 0.2);
+      border-radius: 16px 16px 0 0;
+      -webkit-app-region: drag;
+    }
+
+    .chat-header h2 {
+      color: #ff6b9d;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-buttons {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .header-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .btn-minimize {
+      background: rgba(255, 200, 100, 0.8);
+    }
+
+    .btn-minimize:hover {
+      background: rgba(255, 200, 100, 1);
+    }
+
+    .btn-close {
+      background: rgba(255, 100, 100, 0.8);
+    }
+
+    .btn-close:hover {
+      background: rgba(255, 100, 100, 1);
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: rgba(80, 120, 200, 0.8);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: rgba(233, 69, 96, 0.3);
+      color: #f0f0f0;
+      border-bottom-left-radius: 4px;
+    }
+
+    .message .time {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 4px;
+    }
+
+    .message.typing {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .typing-dot {
+      width: 8px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out;
+    }
+
+    .typing-dot:nth-child(1) { animation-delay: 0s; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+
+    .chat-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 0 0 16px 16px;
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .chat-input:focus {
+      background: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.5);
+    }
+
+    .chat-input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    .chat-input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .input-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .input-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-voice {
+      background: rgba(100, 200, 150, 0.8);
+    }
+
+    .btn-voice:hover {
+      background: rgba(100, 200, 150, 1);
+    }
+
+    .btn-voice.recording {
+      background: rgba(255, 100, 100, 1);
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    .btn-send {
+      background: linear-gradient(135deg, #e94560 0%, #ff6b9d 100%);
+      color: white;
+    }
+
+    .btn-send:hover:not(:disabled) {
+      transform: scale(1.05);
+    }
+
+    .status-bar {
+      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #6bcb77;
+    }
+
+    .status-dot.offline {
+      background: #ff6b6b;
+    }
+
+    .waiting-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .waiting-overlay h2 {
+      color: #ff6b9d;
+      margin-bottom: 16px;
+    }
+
+    .waiting-overlay p {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+    }
+
+    .waiting-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #ff6b9d;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="waiting-overlay" id="waitingOverlay">
+    <div class="waiting-spinner"></div>
+    <h2>等待网页登录...</h2>
+    <p>请先在网页端登录七音盒</p>
+  </div>
+
+  <div class="chat-container">
+    <div class="chat-header">
+      <h2>🌸 七音盒</h2>
+      <div class="header-buttons">
+        <button class="header-btn btn-minimize" onclick="minimizeWindow()">−</button>
+        <button class="header-btn btn-close" onclick="closeWindow()">×</button>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="message assistant">
+        <span>嗨！开拓者！我是三月七～有什么事吗？或者...想和我聊聊天？</span>
+        <div class="time">现在</div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <input type="text" class="chat-input" id="chatInput" placeholder="输入消息..." onkeypress="handleKeyPress(event)" />
+      <button class="input-btn btn-voice" id="voiceBtn" onclick="toggleVoice()">🎤</button>
+      <button class="input-btn btn-send" id="sendBtn" onclick="sendMessage()">➤</button>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-indicator">
+        <div class="status-dot offline" id="statusDot"></div>
+        <span id="statusText">等待登录...</span>
+      </div>
+      <span id="userName">-</span>
+    </div>
+  </div>
+
+  <script>
+    let apiBase = 'http://127.0.0.1:8000';
+    let token = null;
+    let currentUser = null;
+    let isRecording = false;
+    let recognition = null;
+    let currentSessionId = null;
+
+    async function checkSharedToken() {
+      try {
+        const response = await fetch(`${apiBase}/api/auth/shared-token`);
+        const data = await response.json();
+        
+        if (data.success && data.token) {
+          const wasLoggedIn = token !== null;
+          token = data.token;
+          currentUser = data.user;
+          document.getElementById('waitingOverlay').style.display = 'none';
+          document.getElementById('statusDot').classList.remove('offline');
+          document.getElementById('statusText').textContent = '已连接';
+          document.getElementById('userName').textContent = currentUser?.username || '-';
+          document.getElementById('chatInput').disabled = false;
+          document.getElementById('voiceBtn').disabled = false;
+          document.getElementById('sendBtn').disabled = false;
+          return true;
+        } else {
+          token = null;
+          currentUser = null;
+          document.getElementById('waitingOverlay').style.display = 'flex';
+          document.getElementById('statusDot').classList.add('offline');
+          document.getElementById('statusText').textContent = '等待登录...';
+          document.getElementById('userName').textContent = '-';
+          document.getElementById('chatInput').disabled = true;
+          document.getElementById('voiceBtn').disabled = true;
+          document.getElementById('sendBtn').disabled = true;
+          return false;
+        }
+      } catch (e) {
+        token = null;
+        currentUser = null;
+        document.getElementById('waitingOverlay').style.display = 'flex';
+        document.getElementById('statusDot').classList.add('offline');
+        document.getElementById('statusText').textContent = '离线';
+        document.getElementById('userName').textContent = '-';
+        document.getElementById('chatInput').disabled = true;
+        document.getElementById('voiceBtn').disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+        return false;
+      }
+    }
+
+    async function ensureSession(firstMessage = null) {
+      if (currentSessionId) return currentSessionId;
+      
+      try {
+        const response = await fetch(`${apiBase}/api/sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            character_id: 'march7th',
+            title: firstMessage ? firstMessage.substring(0, 50) : '桌宠对话'
+          })
+        });
+        
+        const data = await response.json();
+        if (data.success && data.session_id) {
+          currentSessionId = data.session_id;
+          console.log('[Chat] 创建新会话:', currentSessionId);
+          if (window.electronAPI && window.electronAPI.setDesktopSession) {
+            await window.electronAPI.setDesktopSession(currentSessionId);
+          }
+          return currentSessionId;
+        }
+      } catch (e) {
+        console.error('[Chat] 创建会话失败:', e);
+      }
+      return null;
+    }
+
+    function addMessage(content, type) {
+      const messagesEl = document.getElementById('chatMessages');
+      const messageEl = document.createElement('div');
+      
+      if (type === 'user') {
+        messageEl.className = 'message user';
+      } else if (type === 'assistant') {
+        messageEl.className = 'message assistant';
+      } else {
+        messageEl.className = `message ${type}`;
+      }
+
+      const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+      if (type === 'typing') {
+        messageEl.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+      } else {
+        messageEl.innerHTML = `<span>${escapeHtml(content)}</span><div class="time">${time}</div>`;
+      }
+
+      messagesEl.appendChild(messageEl);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      return messageEl;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function clearMessages() {
+      const messagesEl = document.getElementById('chatMessages');
+      messagesEl.innerHTML = '';
+    }
+
+    async function loadSessionHistory() {
+      if (!token || !currentSessionId) return;
+      
+      try {
+        const response = await fetch(`${apiBase}/api/sessions/${currentSessionId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.messages && data.messages.length > 0) {
+          clearMessages();
+          
+          for (const msg of data.messages) {
+            addMessage(msg.user_input, 'user');
+            addMessage(msg.bot_reply, 'assistant');
+          }
+        }
+      } catch (e) {
+        console.error('[Chat] 加载会话历史失败:', e);
+      }
+    }
+
+    function setTyping(typing) {
+      const existingTyping = document.querySelector('.message.typing');
+      if (typing) {
+        if (!existingTyping) {
+          addMessage('', 'typing');
+        }
+      } else {
+        if (existingTyping) {
+          existingTyping.remove();
+        }
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const message = input.value.trim();
+
+      if (!message || !token) return;
+
+      if (!currentSessionId) {
+        await ensureSession(message);
+        if (!currentSessionId) {
+          addMessage('无法创建会话', 'assistant');
+          return;
+        }
+      }
+
+      input.value = '';
+      addMessage(message, 'user');
+      setTyping(true);
+
+      try {
+        const response = await fetch(`${apiBase}/api/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            message: message,
+            character_id: 'march7th',
+            session_id: currentSessionId
+          })
+        });
+
+        const data = await response.json();
+        setTyping(false);
+
+        if (data.success) {
+          addMessage(data.response, 'assistant');
+          if (data.audio) {
+            playAudio(data.audio);
+          }
+        } else {
+          addMessage('抱歉，出了点小问题...', 'assistant');
+        }
+      } catch (e) {
+        setTyping(false);
+        addMessage('无法连接到服务器', 'assistant');
+      }
+    }
+
+    let chatAudio = null;
+    function playAudio(base64Audio) {
+      console.log('[Chat] playAudio 被调用，音频数据长度:', base64Audio ? base64Audio.length : 0);
+      
+      if (!base64Audio) {
+        console.log('[Chat] 没有音频数据');
+        return;
+      }
+      
+      if (chatAudio) {
+        chatAudio.pause();
+        chatAudio = null;
+      }
+      
+      try {
+        chatAudio = new Audio(`data:audio/wav;base64,${base64Audio}`);
+        
+        chatAudio.addEventListener('playing', () => {
+          console.log('[Chat] 音频正在播放');
+        });
+        
+        chatAudio.addEventListener('ended', () => {
+          console.log('[Chat] 音频播放结束');
+          chatAudio = null;
+        });
+        
+        chatAudio.addEventListener('error', (e) => {
+          console.error('[Chat] 音频播放错误:', e);
+          chatAudio = null;
+        });
+        
+        const playPromise = chatAudio.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log('[Chat] 音频播放成功');
+          }).catch(e => {
+            console.error('[Chat] 音频播放失败:', e.name, e.message);
+          });
+        }
+      } catch (e) {
+        console.error('[Chat] 创建音频失败:', e);
+      }
+    }
+
+    function handleKeyPress(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function minimizeWindow() {
+      if (window.electronAPI) {
+        window.electronAPI.minimizeWindow();
+      }
+    }
+
+    function closeWindow() {
+      window.close();
+    }
+
+    function toggleVoice() {
+      if (!token) return;
+      
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert('您的浏览器不支持语音识别，请使用 Chrome 或 Edge');
+        return;
+      }
+
+      const btn = document.getElementById('voiceBtn');
+
+      if (isRecording) {
+        stopVoiceInput();
+        btn.classList.remove('recording');
+        isRecording = false;
+      } else {
+        startVoiceInput();
+        btn.classList.add('recording');
+        isRecording = true;
+      }
+    }
+
+    function startVoiceInput() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.lang = 'zh-CN';
+      recognition.continuous = false;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          document.getElementById('chatInput').value = finalTranscript;
+          sendMessage();
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error !== 'no-speech') {
+          alert('语音识别错误: ' + event.error);
+        }
+        document.getElementById('voiceBtn').classList.remove('recording');
+        isRecording = false;
+      };
+
+      recognition.onend = () => {
+        document.getElementById('voiceBtn').classList.remove('recording');
+        isRecording = false;
+      };
+
+      recognition.start();
+    }
+
+    function stopVoiceInput() {
+      if (recognition) {
+        recognition.stop();
+      }
+    }
+
+    checkSharedToken();
+    setInterval(checkSharedToken, 2000);
+
+    console.log('[Chat] 页面加载完成，检查 electronAPI...');
+    if (window.electronAPI) {
+      console.log('[Chat] electronAPI 存在');
+      
+      if (window.electronAPI.onWindowShown) {
+        window.electronAPI.onWindowShown(async () => {
+          console.log('[Chat] 窗口显示事件，currentSessionId:', currentSessionId);
+          if (!currentSessionId && window.electronAPI.getDesktopSession) {
+            const mainSessionId = await window.electronAPI.getDesktopSession();
+            console.log('[Chat] 从主进程获取会话ID:', mainSessionId);
+            if (mainSessionId) {
+              currentSessionId = mainSessionId;
+              await loadSessionHistory();
+            }
+          } else if (currentSessionId) {
+            await loadSessionHistory();
+          }
+        });
+      }
+      
+      if (window.electronAPI.onVoiceChatResponse) {
+        console.log('[Chat] onVoiceChatResponse 方法存在，注册监听器');
+        window.electronAPI.onVoiceChatResponse(async (data) => {
+          console.log('[Chat] 收到 voice-chat-response:', data);
+          console.log('[Chat] userText:', data.userText);
+          console.log('[Chat] response:', data.response ? data.response.substring(0, 50) + '...' : 'null');
+          console.log('[Chat] audio:', data.audio ? `存在，长度 ${data.audio.length}` : 'null');
+          console.log('[Chat] session_id:', data.session_id);
+          
+          if (data.session_id) {
+            currentSessionId = data.session_id;
+            if (window.electronAPI && window.electronAPI.setDesktopSession) {
+              await window.electronAPI.setDesktopSession(currentSessionId);
+            }
+            console.log('[Chat] 更新会话ID:', currentSessionId);
+          }
+          
+          addMessage(data.userText, 'user');
+          setTyping(true);
+          setTimeout(() => {
+            setTyping(false);
+            addMessage(data.response, 'assistant');
+            if (data.audio) {
+              console.log('[Chat] 准备播放音频...');
+              playAudio(data.audio);
+            }
+          }, 500);
+        });
+      } else {
+        console.log('[Chat] onVoiceChatResponse 方法不存在');
+      }
+    } else {
+      console.log('[Chat] electronAPI 不存在');
+    }
+  </script>
+</body>
+</html>

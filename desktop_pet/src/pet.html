@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>七音盒桌宠</title>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <div class="pet-wrapper">
+    <div class="voice-bubble" id="voiceBubble">
+      <span id="voiceBubbleText"></span>
+    </div>
+    <div class="pet-container">
+      <img id="pet-image" class="pet-image" src="" alt="pet" draggable="false">
+      <div class="pet-glow"></div>
+      <div class="voice-indicator" id="voiceIndicator" style="display: none;">
+        <span class="voice-icon idle" id="voiceIcon">🎤</span>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    console.log('[Pet] ===== 脚本加载 =====');
+    console.log('[Pet] 使用离线 ASR (sherpa-onnx)');
+    
+    const petImage = document.getElementById('pet-image');
+    let isDragging = false;
+    let dragOffset = { x: 0, y: 0 };
+    let clickStartTime = 0;
+    let pendingPosition = null;
+    let rafId = null;
+    let lastSentPosition = { x: 0, y: 0 };
+    
+    async function loadPetImage(type = 'normal') {
+      const imagePath = await ipcRenderer.invoke('get-pet-image', type);
+      petImage.src = imagePath;
+    }
+    
+    loadPetImage('normal');
+    
+    function sendPositionUpdate() {
+      if (pendingPosition && isDragging) {
+        const dx = Math.abs(pendingPosition.x - lastSentPosition.x);
+        const dy = Math.abs(pendingPosition.y - lastSentPosition.y);
+        if (dx > 1 || dy > 1) {
+          ipcRenderer.invoke('pet-drag-move', pendingPosition.x, pendingPosition.y);
+          lastSentPosition = { x: pendingPosition.x, y: pendingPosition.y };
+        }
+        pendingPosition = null;
+        rafId = requestAnimationFrame(sendPositionUpdate);
+      } else {
+        rafId = null;
+      }
+    }
+    
+    document.body.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      isDragging = true;
+      clickStartTime = Date.now();
+      dragOffset = {
+        x: e.clientX,
+        y: e.clientY
+      };
+      lastSentPosition = { x: e.screenX, y: e.screenY };
+      ipcRenderer.invoke('pet-drag-start', dragOffset);
+    });
+    
+    document.body.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        pendingPosition = { x: e.screenX, y: e.screenY };
+        if (!rafId) {
+          rafId = requestAnimationFrame(sendPositionUpdate);
+        }
+      }
+    });
+    
+    document.body.addEventListener('mouseup', (e) => {
+      const clickDuration = Date.now() - clickStartTime;
+      const moveDistance = Math.sqrt(
+        Math.pow(e.clientX - dragOffset.x, 2) + 
+        Math.pow(e.clientY - dragOffset.y, 2)
+      );
+      
+      isDragging = false;
+      pendingPosition = null;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      ipcRenderer.invoke('pet-drag-end');
+      
+      if (clickDuration < 200 && moveDistance < 5) {
+        ipcRenderer.invoke('pet-clicked');
+        loadPetImage('happy');
+        setTimeout(() => loadPetImage('normal'), 2000);
+      }
+    });
+    
+    document.body.addEventListener('mouseleave', () => {
+      if (isDragging) {
+        isDragging = false;
+        pendingPosition = null;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        ipcRenderer.invoke('pet-drag-end');
+      }
+    });
+    
+    document.body.addEventListener('dragstart', (e) => {
+      e.preventDefault();
+      return false;
+    });
+    
+    setInterval(() => {
+      if (!isDragging) {
+        petImage.classList.toggle('bounce');
+      }
+    }, 3000);
+
+    class VoiceManager {
+      constructor() {
+        this.state = 'idle';
+        this.wakeWord = '三月七';
+        this.characterId = 'march7th';
+        this.onWake = null;
+        this.onSpeechResult = null;
+        this.onStateChange = null;
+        this.onInterimResult = null;
+        this._wakeDetected = false;
+        this._isProcessing = false;
+        this._initWakeWord();
+        this._setupAsrListeners();
+      }
+
+      async _initWakeWord() {
+        try {
+          const result = await ipcRenderer.invoke('get-wake-word', this.characterId);
+          if (result.success && result.wakeWord) {
+            this.wakeWord = result.wakeWord;
+            console.log(`[VoiceManager] 唤醒词已加载: ${this.wakeWord}`);
+          }
+        } catch (e) {
+          console.warn('[VoiceManager] 获取唤醒词失败，使用默认值:', e);
+        }
+      }
+
+      _setupAsrListeners() {
+        ipcRenderer.on('asr-ready', () => {
+          console.log('[VoiceManager] ASR 服务就绪');
+        });
+
+        ipcRenderer.on('asr-listening', (event, listening) => {
+          console.log('[VoiceManager] ASR 监听状态:', listening);
+        });
+
+        ipcRenderer.on('asr-partial', (event, text) => {
+          console.log('[VoiceManager] 实时识别:', text);
+          if (this.onInterimResult && this._wakeDetected && !this._isProcessing) {
+            this.onInterimResult(text);
+          }
+        });
+
+        ipcRenderer.on('asr-result', async (event, text) => {
+          console.log('[VoiceManager] 最终结果:', text, '| wakeDetected:', this._wakeDetected, '| isProcessing:', this._isProcessing);
+          
+          if (this._isProcessing) {
+            console.log('[VoiceManager] 已有请求在处理中，忽略新结果');
+            return;
+          }
+          
+          if (this._wakeDetected && text) {
+            this._isProcessing = true;
+            this._wakeDetected = false;
+            this.setState('processing');
+            
+            console.log('[VoiceManager] 立即停止 ASR，防止继续捕捉声音');
+            await ipcRenderer.invoke('asr-stop');
+            
+            if (this.onSpeechResult) {
+              this.onSpeechResult(text);
+            }
+          }
+        });
+
+        ipcRenderer.on('asr-error', (event, error) => {
+          console.error('[VoiceManager] ASR 错误:', error);
+          showVoiceBubble('语音识别出错: ' + error);
+          this._isProcessing = false;
+          this._wakeDetected = false;
+        });
+      }
+
+      async updateCharacter(characterId) {
+        this.characterId = characterId || 'march7th';
+        try {
+          const result = await ipcRenderer.invoke('get-wake-word', this.characterId);
+          if (result.success && result.wakeWord) {
+            this.wakeWord = result.wakeWord;
+            console.log(`[VoiceManager] 唤醒词已更新: ${this.wakeWord}`);
+          }
+        } catch (e) {
+          console.warn('[VoiceManager] 获取唤醒词失败，使用默认值:', e);
+          this.wakeWord = '三月七';
+        }
+      }
+
+      setState(newState) {
+        this.state = newState;
+        if (this.onStateChange) this.onStateChange(newState);
+      }
+
+      async startListening(preserveWakeState = false) {
+        console.log('[VoiceManager] 启动离线 ASR, preserveWakeState:', preserveWakeState);
+        
+        if (this._isProcessing) {
+          console.log('[VoiceManager] 正在处理中，拒绝启动 ASR');
+          return false;
+        }
+        
+        if (preserveWakeState) {
+          this._wakeDetected = true;
+          console.log('[VoiceManager] 保持唤醒状态:', this._wakeDetected);
+        }
+        
+        this.setState('listening');
+        
+        const result = await ipcRenderer.invoke('asr-start');
+        console.log('[VoiceManager] ASR 启动结果:', result);
+        
+        return result.success;
+      }
+
+      async stopListening() {
+        console.log('[VoiceManager] 停止 ASR');
+        await ipcRenderer.invoke('asr-stop');
+        this._wakeDetected = false;
+        this._isProcessing = false;
+        this.setState('idle');
+      }
+
+      finishProcessing() {
+        console.log('[VoiceManager] 处理完成，释放锁');
+        this._isProcessing = false;
+        this._wakeDetected = false;
+        this.setState('idle');
+      }
+    }
+
+    const voiceManager = new VoiceManager();
+    const voiceIcon = document.getElementById('voiceIcon');
+    const voiceIndicator = document.getElementById('voiceIndicator');
+    const voiceBubble = document.getElementById('voiceBubble');
+    const voiceBubbleText = document.getElementById('voiceBubbleText');
+
+    voiceManager.onStateChange = (state) => {
+      updateVoiceIndicator(state);
+    };
+
+    voiceManager.onWake = () => {
+      loadPetImage('surprised');
+      setTimeout(() => loadPetImage('happy'), 1000);
+    };
+
+    voiceManager.onInterimResult = (text) => {
+      if (voiceManager._wakeDetected && text) {
+        showVoiceBubble('🎤 ' + text, true);
+      }
+    };
+
+    voiceManager.onSpeechResult = async (text) => {
+      console.log('[Pet] 处理语音结果:', text);
+      showVoiceBubble('💬 你说: ' + text);
+      loadPetImage('thinking');
+      
+      try {
+        const result = await ipcRenderer.invoke('voice-result', text);
+        console.log('[Pet] 后端返回:', result);
+        console.log('[Pet] result.success:', result.success);
+        console.log('[Pet] result.response:', result.response ? result.response.substring(0, 50) + '...' : 'null');
+        console.log('[Pet] result.audio:', result.audio ? `存在，长度 ${result.audio.length}` : 'null');
+        
+        if (result.success && result.response) {
+          console.log('[Pet] 语音处理成功，等待 voice-bubble 事件显示回复');
+        } else {
+          showVoiceBubble('抱歉，我没听清...');
+          loadPetImage('normal');
+        }
+      } catch (e) {
+        console.error('[Pet] 语音处理错误:', e);
+        showVoiceBubble('处理出错: ' + e.message);
+        loadPetImage('normal');
+      }
+      
+      voiceManager.finishProcessing();
+      
+      console.log('[Pet] 等待麦克风释放后重启 KWS...');
+      await new Promise(r => setTimeout(r, 500));
+      console.log('[Pet] 启动 KWS...');
+      const kwsResult = await ipcRenderer.invoke('kws-start');
+      console.log('[Pet] KWS 启动结果:', kwsResult);
+    };
+
+    function updateVoiceIndicator(state) {
+      switch(state) {
+        case 'idle':
+          voiceIcon.textContent = '🎤';
+          voiceIcon.className = 'voice-icon idle';
+          break;
+        case 'listening':
+          voiceIcon.textContent = '🎤';
+          voiceIcon.className = 'voice-icon listening';
+          break;
+        case 'awake':
+          voiceIcon.textContent = '🎤';
+          voiceIcon.className = 'voice-icon awake';
+          break;
+        case 'processing':
+          voiceIcon.textContent = '⏳';
+          voiceIcon.className = 'voice-icon processing';
+          break;
+      }
+    }
+
+    ipcRenderer.on('voice-bubble', (event, data) => {
+      console.log('[Pet] 收到 voice-bubble 事件:', typeof data === 'object' ? 'object' : 'string');
+      if (typeof data === 'object' && data.text) {
+        showVoiceBubble(data.text);
+        loadPetImage('happy');
+        if (data.audio && !data.chatWindowVisible) {
+          console.log('[Pet] voice-bubble 包含音频数据，聊天窗口不可见，播放音频');
+          playAudio(data.audio);
+        } else if (data.chatWindowVisible) {
+          console.log('[Pet] 聊天窗口可见，跳过桌宠音频播放');
+        }
+      } else {
+        showVoiceBubble(data);
+      }
+    });
+
+    let currentAudio = null;
+    function playAudio(base64Audio) {
+      console.log('[Pet] playAudio 被调用，音频数据长度:', base64Audio ? base64Audio.length : 0);
+      
+      if (!base64Audio) {
+        console.log('[Pet] 没有音频数据，跳过播放');
+        return;
+      }
+      
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+      
+      try {
+        const audioSrc = 'data:audio/wav;base64,' + base64Audio;
+        currentAudio = new Audio(audioSrc);
+        
+        currentAudio.addEventListener('canplaythrough', () => {
+          console.log('[Pet] 音频可以播放');
+        });
+        
+        currentAudio.addEventListener('playing', () => {
+          console.log('[Pet] 音频正在播放');
+        });
+        
+        currentAudio.addEventListener('ended', () => {
+          console.log('[Pet] 音频播放结束');
+          currentAudio = null;
+        });
+        
+        currentAudio.addEventListener('error', (e) => {
+          console.error('[Pet] 音频播放错误:', e);
+          currentAudio = null;
+        });
+        
+        const playPromise = currentAudio.play();
+        
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log('[Pet] 音频播放成功');
+          }).catch(e => {
+            console.error('[Pet] 音频播放失败:', e.name, e.message);
+            if (e.name === 'NotAllowedError') {
+              console.log('[Pet] 音频播放被阻止，可能需要用户交互');
+            }
+          });
+        }
+      } catch (e) {
+        console.error('[Pet] 创建音频失败:', e);
+      }
+    }
+
+    let bubbleTimeout = null;
+    function showVoiceBubble(text, keepShowing = false) {
+      if (bubbleTimeout) {
+        clearTimeout(bubbleTimeout);
+        bubbleTimeout = null;
+      }
+      
+      voiceBubbleText.textContent = text.length > 50 ? text.substring(0, 50) + '...' : text;
+      voiceBubble.style.display = 'block';
+      
+      if (!keepShowing) {
+        bubbleTimeout = setTimeout(() => {
+          voiceBubble.style.display = 'none';
+          bubbleTimeout = null;
+        }, 5000);
+      }
+    }
+
+    voiceIndicator.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (voiceManager.state === 'idle') {
+        voiceManager.startListening();
+      } else {
+        voiceManager.stopListening();
+      }
+    });
+
+    voiceIndicator.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
+
+    voiceIndicator.addEventListener('mouseup', (e) => {
+      e.stopPropagation();
+    });
+
+    voiceIndicator.style.display = 'flex';
+
+    ipcRenderer.on('emotion-change', (event, emotion) => {
+      const emotionImageMap = {
+        neutral: 'normal',
+        happy: 'happy',
+        confused: 'thinking',
+        sad: 'normal',
+        angry: 'normal',
+        excited: 'surprised'
+      };
+      const imageType = emotionImageMap[emotion] || 'normal';
+      loadPetImage(imageType);
+    });
+
+    ipcRenderer.on('update-pet-image', (event, imageType) => {
+      loadPetImage(imageType);
+    });
+
+    ipcRenderer.on('wake-word-detected', async (event, keyword) => {
+      console.log('[Pet] ===== 收到唤醒词事件 =====');
+      console.log('[Pet] keyword:', keyword);
+      console.log('[Pet] voiceManager.state:', voiceManager.state);
+      console.log('[Pet] voiceManager._isProcessing:', voiceManager._isProcessing);
+      
+      if (voiceManager._isProcessing) {
+        console.log('[Pet] 正在处理中，忽略唤醒词');
+        return;
+      }
+      
+      if (voiceManager.state === 'idle') {
+        console.log('[Pet] 开始处理唤醒...');
+        await ipcRenderer.invoke('kws-stop');
+        console.log('[Pet] 已停止 KWS 服务，等待麦克风释放...');
+        
+        await new Promise(r => setTimeout(r, 300));
+        
+        loadPetImage('surprised');
+        setTimeout(() => loadPetImage('happy'), 800);
+        
+        voiceManager._wakeDetected = true;
+        voiceManager.setState('awake');
+        if (voiceManager.onWake) voiceManager.onWake();
+        
+        showVoiceBubble('我在！请说...', true);
+        
+        console.log('[Pet] 启动离线 ASR, wakeDetected:', voiceManager._wakeDetected);
+        await voiceManager.startListening(true);
+        voiceManager.setState('awake');
+      } else {
+        console.log('[Pet] 当前状态不是 idle，跳过处理');
+      }
+    });
+
+    ipcRenderer.on('wake-word-listening', (event, listening) => {
+      console.log('[Pet] 唤醒词监听状态:', listening);
+      if (listening) {
+        voiceIndicator.classList.add('kws-active');
+      } else {
+        voiceIndicator.classList.remove('kws-active');
+      }
+    });
+
+    ipcRenderer.on('wake-word-error', (event, error) => {
+      console.error('[Pet] 唤醒词错误:', error);
+      showVoiceBubble('唤醒词检测出错');
+    });
+
+    ipcRenderer.on('voice-command', (event, command) => {
+      if (command === 'start') {
+        voiceManager.startListening();
+      } else if (command === 'stop') {
+        voiceManager.stopListening();
+      }
+    });
+  </script>
+</body>
+</html>
