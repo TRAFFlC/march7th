@@ -283,10 +283,11 @@ class DatabaseManager:
     
     def _create_default_admin(self):
         with self.connection.cursor() as cursor:
-            username = os.environ.get('ADMIN_USERNAME', 'admin')
+            from personal_config import ADMIN_CONFIG
+            username = ADMIN_CONFIG.get("default_username", "admin")
             cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
             if not cursor.fetchone():
-                password = os.environ.get('ADMIN_PASSWORD', 'admin')
+                password = ADMIN_CONFIG.get("default_password", "")
                 password_hash = hash_password(password)
                 cursor.execute(
                     "INSERT INTO users (username, password_hash) VALUES (%s, %s)",

@@ -134,50 +134,42 @@ function stopListening() {
             return;
         }
 
-        const pid = asrProcess.pid;
-        let resolved = false;
-
-        const doResolve = () => {
-            if (resolved) return;
-            resolved = true;
+        const processToKill = asrProcess;
+        const pid = processToKill.pid;
+        
+        console.log('[ASR] 发送停止信号， PID:', pid);
+        
+        const exitHandler = () => {
+            console.log('[ASR] 进程已完全退出');
             isListening = false;
             asrProcess = null;
-            console.log('[ASR] 停止监听');
-            
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('asr-listening', false);
             }
             resolve();
         };
-
-        asrProcess.on('close', () => {
-            console.log('[ASR] 进程已退出');
-            doResolve();
-        });
-
+        
+        processToKill.on('close', exitHandler);
+        
         try {
-            console.log('[ASR] 发送停止信号...');
             process.kill(pid, 'SIGTERM');
-            
-            setTimeout(() => {
-                try {
-                    process.kill(pid, 0);
-                    console.log('[ASR] 进程仍在运行，发送 SIGKILL');
-                    process.kill(pid, 'SIGKILL');
-                } catch (e) {
-                    // 进程已退出
-                }
-            }, 1000);
-
-            setTimeout(() => {
-                console.log('[ASR] 超时，强制完成停止');
-                doResolve();
-            }, 3000);
-            
         } catch (e) {
-            console.error('[ASR] 停止失败:', e);
-            doResolve();
+            console.error('[ASR] SIGTERM 失败:', e);
         }
+        
+        setTimeout(() => {
+            if (processToKill && processToKill.pid) {
+                try {
+                    process.kill(processToKill.pid, 'SIGKILL');
+                    console.log('[ASR] 强制终止进程');
+                } catch (e) {
+                    console.log('[ASR] 进程已不存在');
+                }
+            }
+            isListening = false;
+            asrProcess = null;
+            resolve();
+        }, 2000);
     });
 }
 

@@ -1235,10 +1235,18 @@ async function submitFeedbackWithRating(feedbackType) {
   lastFeedbackType.value = feedbackType
   
   try {
-    await api.post('/chat/feedback', {
+    const feedbackResponse = await api.post('/chat/feedback', {
       conversation_id: lastConversationId.value,
       feedback_type: feedbackType
     })
+
+    if (feedbackResponse.timeout) {
+      feedbackMessage.value = '⏱️ RAG迭代分析超时，API响应时间过长，请稍后重试'
+      feedbackMessageType.value = 'error'
+      closeFeedbackModal()
+      setTimeout(() => { feedbackMessage.value = '' }, 5000)
+      return
+    }
     
     const labels = {
       fact_error: '事实不符',
@@ -1369,7 +1377,13 @@ async function fetchRagIteration(forceRegenerate = false) {
       showIterationApiWarning.value = true
       return
     }
-    
+
+    if (response.timeout) {
+      ragIterationResult.value = '<div class="rag-timeout-error">⏱️ RAG迭代分析超时，API响应时间过长，请稍后重试</div>'
+      ragIterationLoading.value = false
+      return
+    }
+
     if (response.feedback_id) {
       ragIterationFeedbackId.value = response.feedback_id
     }
@@ -2908,6 +2922,15 @@ async function deleteSessionAction() {
 .rag-error {
   color: #ff6b6b;
   padding: 12px;
+}
+
+.rag-timeout-error {
+  color: #ffa726;
+  padding: 16px;
+  background: rgba(255, 167, 38, 0.1);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 14px;
 }
 
 .rag-api-error {

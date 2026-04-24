@@ -42,8 +42,10 @@ RAG_CONFIG = {
     "rerank_model": _env("RERANK_MODEL", "BAAI/bge-reranker-base"),
 }
 
-ADMIN_USERNAME = _env("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = _env("ADMIN_PASSWORD", "admin")
+ADMIN_CONFIG = {
+    "default_username": _env("ADMIN_USERNAME", "admin"),
+    "default_password": _env("ADMIN_PASSWORD", ""),
+}
 
 LOG_CONFIG = {
     "log_dir": "logs",

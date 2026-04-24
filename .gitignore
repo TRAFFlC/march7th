@@ -1,86 +1,26 @@
-# 环境变量（包含敏感信息）
 .env
-.env.local
-.env.*.local
-
-# 日志文件
 logs/
-*.log
-
-# 模型权重文件（体积大，需用户自行准备）
-# 但允许 resources/tts/models/ 和 resources/tts/ref_audio/ 目录下的资源
-*.pt
-*.bin
+*.ckpt
+*.pth
 *.safetensors
-*.onnx
-
-# 模型权重文件（体积大，超过GitHub 100MB限制，需用户自行下载）
-# 放置到 resources/tts/models/ 目录
-# GPT模型: *.ckpt 文件
-# SoVITS模型: *.pth 文件
-resources/tts/models/*.ckpt
-resources/tts/models/*.pth
-!resources/tts/ref_audio/**/*.wav
-!resources/tts/ref_audio/**/*.flac
-
-# 数据库文件
-# rag_db/ 目录已构建，可直接上传
+*.bin
+rag_db/
 persona_db/
-data/app.db
-*.db
-*.sqlite3
-
-# Python 缓存
+models/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
 .venv/
-venv/
-ENV/
-*.egg-info/
-.eggs/
-
-# Node.js
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# 构建输出
 dist/
-build/
-*.egg
+*.egg-info/
 
-# IDE 和工具
-.idea/
-.vscode/
-*.swp
-*.swo
+# IDE / 工具生成
 .agents/
+skills-lock.json
 .trae/
 .pytest_cache/
-.mypy_cache/
-skills-lock.json
 
-# 运行时生成的数据
+# 运行时数据
 shared_token.json
 user_persona.jsonl
-
-# 系统文件
-.DS_Store
-Thumbs.db
-*.bak
-*.tmp
-
-# 大型资源文件（用户需自行准备）
-resources/emotions/
-resources/character_texts/
-
-# 桌宠模型缓存
-desktop_pet/models/.cache/
-
-# ASR语音识别模型（体积大，超过GitHub 100MB限制，需用户自行下载）
-# 下载后移动整个 asr_model 文件夹到 desktop_pet/models/ 目录
-desktop_pet/models/asr_model/
+data/app.db

@@ -51,6 +51,7 @@
         "api_key": "",
         "model_name": "minimax/minimax-m2.5:free"
       },
+      "iteration_apis": [],
       "emotion_api_config": null,
       "emotion_images": {
         "neutral": "",

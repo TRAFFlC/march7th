@@ -1,5 +1,6 @@
 import time
 import json
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generator, List, Dict, Any, Optional
@@ -146,6 +147,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._http_client = None
+        self._cancelled = threading.Event()
+
+    def cancel(self):
+        self._cancelled.set()
+
+    def reset_cancel(self):
+        self._cancelled.clear()
 
     def _get_http_client(self):
         if self._http_client is not None:
@@ -224,6 +232,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
         last_error = None
         for attempt in range(self.max_retries + 1):
+            if self._cancelled.is_set():
+                return {
+                    "content": "",
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                    "error": "Request cancelled due to timeout",
+                    "cancelled": True,
+                }
             try:
                 if hasattr(client, "post") and not hasattr(client, "Client"):
                     response = client.post(url, headers=headers, json=body, timeout=120.0)
@@ -260,6 +275,17 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         response_json = resp.json()
 
                 print(f"[OpenAI Compatible] API响应: {json.dumps(response_json, ensure_ascii=False)[:500]}...")
+
+                resp_error = response_json.get("error")
+                if resp_error:
+                    error_msg = resp_error if isinstance(resp_error, str) else resp_error.get("message", str(resp_error))
+                    error_code = resp_error.get("code") if isinstance(resp_error, dict) else None
+                    print(f"[OpenAI Compatible] API返回错误: code={error_code}, message={error_msg}")
+                    return {
+                        "content": "",
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "error": f"API错误(code={error_code}): {error_msg}",
+                    }
 
                 content = ""
                 usage = {"input_tokens": 0, "output_tokens": 0}

@@ -27,7 +27,7 @@ from pathlib import Path
 import shutil
 from urllib.parse import quote
 
-from personal_config import MYSQL_CONFIG, JWT_CONFIG, PATH_CONFIG
+from personal_config import MYSQL_CONFIG, ADMIN_CONFIG, JWT_CONFIG, PATH_CONFIG
 from security_filter import SecurityFilter
 
 OLLAMA_PROCESS = None
@@ -310,6 +310,7 @@ class CharacterCreate(BaseModel):
     rag_enabled: Optional[bool] = True
     api_config: Optional[dict] = None
     iteration_api_config: Optional[dict] = None
+    iteration_apis: Optional[list] = None
     emotion_api_config: Optional[dict] = None
     greeting_templates: Optional[dict] = None
 
@@ -424,7 +425,7 @@ async def login(data: UserLogin):
 async def auto_login():
     from database import get_db, get_user_by_username
     db = get_db()
-    username = os.environ.get('ADMIN_USERNAME', 'admin')
+    username = ADMIN_CONFIG.get("default_username", "admin")
     user = get_user_by_username(db, username)
     if not user:
         raise HTTPException(status_code=500, detail="默认用户不存在")
@@ -590,6 +591,16 @@ async def get_characters(user: dict = Depends(get_current_user)):
                 "has_api_key": bool(char.iteration_api_config.api_key),
                 "model_name": char.iteration_api_config.model_name,
             } if char.iteration_api_config else None,
+            "iteration_apis": [
+                {
+                    "provider_type": api.get("provider_type", "openai_compatible"),
+                    "base_url": api.get("base_url", ""),
+                    "api_key": ("*" * 8 + api.get("api_key", "")[-4:]) if api.get("api_key") and len(api.get("api_key", "")) > 4 else ("*" * 8 if api.get("api_key") else ""),
+                    "has_api_key": bool(api.get("api_key")),
+                    "model_name": api.get("model_name", ""),
+                }
+                for api in (char.iteration_apis or [])
+            ],
             "emotion_api_config": {
                 "provider_type": char.emotion_api_config.provider_type,
                 "base_url": char.emotion_api_config.base_url,
@@ -756,6 +767,8 @@ async def create_or_update_character(data: CharacterCreate, user: dict = Depends
             model_name=data.emotion_api_config.get("model_name", ""),
         )
 
+    iteration_apis = data.iteration_apis if data.iteration_apis else []
+
     character = CharacterConfig(
         id=data.id,
         name=data.name,
@@ -766,6 +779,7 @@ async def create_or_update_character(data: CharacterCreate, user: dict = Depends
         rag_config=rag_config,
         api_config=api_config,
         iteration_api_config=iteration_api_config,
+        iteration_apis=iteration_apis,
         emotion_api_config=emotion_api_config,
         greeting_templates=data.greeting_templates,
     )
@@ -1434,11 +1448,13 @@ async def submit_feedback_detail(data: FeedbackDetailRequest, user: dict = Depen
     char = manager.get_character(conv.get('character', ''))
     character_info = char.llm_config.system_prompt if char else ""
 
-    provider = None
-    if char and char.api_config and char.api_config.provider_type != "ollama":
-        provider = get_provider(char.api_config)
+    providers = []
+    if char:
+        from rag_iteration import get_iteration_api_config
+        iteration_api_configs = get_iteration_api_config(char)
+        providers = [get_provider(config) for config in iteration_api_configs]
 
-    iteration_manager = RAGIterationManager(llm_provider=provider)
+    iteration_manager = RAGIterationManager(llm_providers=providers if providers else None)
 
     conversation_data = {
         "user_input": conv.get("user_input", ""),
@@ -1446,11 +1462,23 @@ async def submit_feedback_detail(data: FeedbackDetailRequest, user: dict = Depen
         "model_name": conv.get("character", ""),
     }
 
-    analysis_result = iteration_manager.process_feedback(
-        feedback_type=data.feedback_type,
-        conversation_data=conversation_data,
-        character_info=character_info,
-    )
+    try:
+        analysis_result = await asyncio.wait_for(
+            asyncio.to_thread(
+                iteration_manager.process_feedback,
+                feedback_type=data.feedback_type,
+                conversation_data=conversation_data,
+                character_info=character_info,
+            ),
+            timeout=90.0,
+        )
+    except asyncio.TimeoutError:
+        iteration_manager.cancel()
+        return {
+            "success": False,
+            "error": "RAG迭代分析超时，请稍后重试",
+            "timeout": True,
+        }
 
     feedback_id = save_feedback_detail(
         db,
@@ -1524,17 +1552,16 @@ async def trigger_rag_iteration(data: RAGIterationRequest, user: dict = Depends(
     char = manager.get_character(conv.get('character', ''))
     character_info = char.llm_config.system_prompt if char else ""
 
-    provider = None
-    iteration_api_config = get_iteration_api_config(char)
-    if iteration_api_config is None:
+    iteration_api_configs = get_iteration_api_config(char)
+    if not iteration_api_configs:
         return {
             "success": False,
             "error": "iteration_api_not_configured",
             "message": "使用本地模型进行迭代分析效果有限，建议配置专用迭代 API（如 OpenRouter 免费模型）以获得更好的分析结果"
         }
-    provider = get_provider(iteration_api_config)
 
-    iteration_manager = RAGIterationManager(llm_provider=provider)
+    providers = [get_provider(config) for config in iteration_api_configs]
+    iteration_manager = RAGIterationManager(llm_providers=providers)
 
     conversation_data = {
         "user_input": conv.get("user_input", ""),
@@ -1542,12 +1569,23 @@ async def trigger_rag_iteration(data: RAGIterationRequest, user: dict = Depends(
         "model_name": conv.get("character", ""),
     }
 
-    result = await asyncio.to_thread(
-        iteration_manager.process_feedback,
-        feedback_type=data.feedback_type,
-        conversation_data=conversation_data,
-        character_info=character_info,
-    )
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                iteration_manager.process_feedback,
+                feedback_type=data.feedback_type,
+                conversation_data=conversation_data,
+                character_info=character_info,
+            ),
+            timeout=90.0,
+        )
+    except asyncio.TimeoutError:
+        iteration_manager.cancel()
+        return {
+            "success": False,
+            "error": "RAG迭代分析超时，请稍后重试",
+            "timeout": True,
+        }
 
     from database import save_feedback_detail
     feedback_id = save_feedback_detail(

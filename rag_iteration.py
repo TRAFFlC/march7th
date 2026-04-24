@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 from typing import Dict, Any, Optional, List
 from feedback_types import FeedbackType
 
@@ -101,38 +102,106 @@ def _ensure_prompts():
         THINK_LEAK_ANALYSIS_PROMPT = _get_rag_prompt("think_leak")
 
 
-def get_iteration_api_config(character) -> Optional[Any]:
+def get_iteration_api_config(character) -> List[Any]:
     if character is None:
-        return None
-    config = None
+        return []
+
+    configs = []
+
+    if hasattr(character, 'iteration_apis') and character.iteration_apis:
+        for api_dict in character.iteration_apis:
+            if isinstance(api_dict, dict) and api_dict.get('provider_type', '') != 'ollama':
+                from llm_provider import APIConfig as _APIConfig
+                configs.append(_APIConfig(
+                    provider_type=api_dict.get('provider_type', 'openai_compatible'),
+                    base_url=api_dict.get('base_url', ''),
+                    api_key=api_dict.get('api_key', ''),
+                    model_name=api_dict.get('model_name', ''),
+                ))
+
     if character.iteration_api_config is not None:
-        config = character.iteration_api_config
-    elif character.api_config is not None:
-        config = character.api_config
-    if config is not None and config.provider_type == 'ollama':
-        return None
-    return config
+        if character.iteration_api_config.provider_type != 'ollama':
+            already_added = any(
+                c.base_url == character.iteration_api_config.base_url
+                and c.model_name == character.iteration_api_config.model_name
+                for c in configs
+            )
+            if not already_added:
+                configs.append(character.iteration_api_config)
+
+    if not configs and character.api_config is not None:
+        if character.api_config.provider_type != 'ollama':
+            configs.append(character.api_config)
+
+    return configs
 
 
 class RAGIterationManager:
-    def __init__(self, llm_provider=None):
-        self.llm_provider = llm_provider
+    def __init__(self, llm_provider=None, llm_providers=None):
+        self.llm_providers = llm_providers or []
+        if llm_provider is not None and llm_provider not in self.llm_providers:
+            self.llm_providers.insert(0, llm_provider)
+        self.llm_provider = self.llm_providers[0] if self.llm_providers else None
+        self._cancelled = threading.Event()
         _ensure_prompts()
 
+    def cancel(self):
+        self._cancelled.set()
+        for provider in self.llm_providers:
+            if hasattr(provider, 'cancel'):
+                provider.cancel()
+
+    def reset_cancel(self):
+        self._cancelled.clear()
+        for provider in self.llm_providers:
+            if hasattr(provider, 'reset_cancel'):
+                provider.reset_cancel()
+
     def _call_llm(self, prompt: str) -> str:
-        if self.llm_provider is None:
+        if self._cancelled.is_set():
+            raise Exception("Request cancelled due to timeout")
+        if not self.llm_providers:
             raise Exception("未配置 LLM 提供商")
+
         messages = [{"role": "user", "content": prompt}]
-        result = self.llm_provider.generate(messages, temperature=0.3, top_p=0.9, max_tokens=1024)
-        
-        if "error" in result and result["error"]:
-            raise Exception(result["error"])
-        
-        content = result.get("content", "")
-        if not content:
-            raise Exception("API 返回空内容，可能是上游服务暂时不可用")
-        
-        return content
+        last_error = None
+
+        for i, provider in enumerate(self.llm_providers):
+            if self._cancelled.is_set():
+                raise Exception("Request cancelled due to timeout")
+            try:
+                if hasattr(provider, 'reset_cancel'):
+                    provider.reset_cancel()
+                result = provider.generate(messages, temperature=0.3, top_p=0.9, max_tokens=1024)
+
+                if self._cancelled.is_set():
+                    raise Exception("Request cancelled due to timeout")
+
+                if result.get("cancelled"):
+                    raise Exception("Request cancelled due to timeout")
+
+                if "error" in result and result["error"]:
+                    last_error = Exception(result["error"])
+                    print(f"[RAG Iteration] API #{i+1} 返回错误: {result['error']}, 尝试下一个配置...")
+                    continue
+
+                content = result.get("content", "")
+                if not content:
+                    last_error = Exception("API 返回空内容")
+                    print(f"[RAG Iteration] API #{i+1} 返回空内容, 尝试下一个配置...")
+                    continue
+
+                if i > 0:
+                    print(f"[RAG Iteration] API #{i+1} 成功响应")
+                return content
+            except Exception as e:
+                if "cancelled" in str(e).lower() or "timeout" in str(e).lower():
+                    raise
+                last_error = e
+                print(f"[RAG Iteration] API #{i+1} 请求异常: {e}, 尝试下一个配置...")
+                continue
+
+        raise last_error or Exception("所有 API 配置均失败")
 
     def export_context_for_fact_error(self, character_info: str, user_input: str,
                                        bot_reply: str, rag_results: List[Dict]) -> str:
@@ -168,9 +237,13 @@ class RAGIterationManager:
 
     def analyze_fact_error(self, character_info: str, user_input: str,
                            bot_reply: str, rag_results: List[Dict]) -> Dict[str, Any]:
+        if self._cancelled.is_set():
+            return {"error": "Request cancelled due to timeout", "cancelled": True}
         prompt = self.export_context_for_fact_error(character_info, user_input, bot_reply, rag_results)
         try:
             response = self._call_llm(prompt)
+            if self._cancelled.is_set():
+                return {"error": "Request cancelled due to timeout", "cancelled": True}
             return json.loads(_extract_json_from_response(response))
         except json.JSONDecodeError:
             return {"raw_response": response, "parse_error": True}
@@ -179,9 +252,13 @@ class RAGIterationManager:
 
     def analyze_role_deviation(self, character_info: str, user_input: str,
                                 bot_reply: str) -> Dict[str, Any]:
+        if self._cancelled.is_set():
+            return {"error": "Request cancelled due to timeout", "cancelled": True}
         prompt = self.export_context_for_role_deviation(character_info, user_input, bot_reply)
         try:
             response = self._call_llm(prompt)
+            if self._cancelled.is_set():
+                return {"error": "Request cancelled due to timeout", "cancelled": True}
             return json.loads(_extract_json_from_response(response))
         except json.JSONDecodeError:
             return {"raw_response": response, "parse_error": True}
@@ -190,9 +267,13 @@ class RAGIterationManager:
 
     def analyze_history_forget(self, character_info: str, conversation_history: List[Dict],
                                 bot_reply: str) -> Dict[str, Any]:
+        if self._cancelled.is_set():
+            return {"error": "Request cancelled due to timeout", "cancelled": True}
         prompt = self.export_context_for_history_forget(character_info, conversation_history, bot_reply)
         try:
             response = self._call_llm(prompt)
+            if self._cancelled.is_set():
+                return {"error": "Request cancelled due to timeout", "cancelled": True}
             return json.loads(_extract_json_from_response(response))
         except json.JSONDecodeError:
             return {"raw_response": response, "parse_error": True}
@@ -200,9 +281,13 @@ class RAGIterationManager:
             return {"error": str(e), "api_error": True}
 
     def analyze_think_leak(self, bot_reply: str, model_name: str) -> Dict[str, Any]:
+        if self._cancelled.is_set():
+            return {"error": "Request cancelled due to timeout", "cancelled": True}
         prompt = THINK_LEAK_ANALYSIS_PROMPT.format(bot_reply=bot_reply, model_name=model_name)
         try:
             response = self._call_llm(prompt)
+            if self._cancelled.is_set():
+                return {"error": "Request cancelled due to timeout", "cancelled": True}
             return json.loads(_extract_json_from_response(response))
         except json.JSONDecodeError:
             return {"raw_response": response, "parse_error": True}

@@ -228,53 +228,61 @@
 
           <div class="form-section collapsible">
             <div class="section-header" @click="toggleSection('iterationApi')">
-              <h4>🔄 RAG迭代API配置</h4>
+              <h4>🔄 RAG迭代API配置 (多API串行回退)</h4>
               <span class="toggle-icon">{{ expandedSections.iterationApi ? '▼' : '▶' }}</span>
             </div>
             <div v-if="expandedSections.iterationApi" class="section-content">
+              <p class="section-hint">配置多个API端点，系统将按顺序尝试，首个成功即停止。支持串行回退，避免单点故障。</p>
+
               <div class="form-group">
                 <label>
                   <input type="checkbox" v-model="editingCharacter.use_main_api_for_iteration" @change="onIterationApiToggle" />
                   使用主API配置
                 </label>
               </div>
+
               <template v-if="!editingCharacter.use_main_api_for_iteration">
-                <div class="form-group">
-                  <label>Provider 类型</label>
-                  <select v-model="editingCharacter.iteration_provider_type" class="input-field">
-                    <option value="ollama">Ollama (本地)</option>
-                    <option value="openai_compatible">OpenAI 兼容 API</option>
-                  </select>
+                <div v-for="(api, index) in editingCharacter.iteration_apis" :key="index" class="iteration-api-item">
+                  <div class="iteration-api-header">
+                    <span class="iteration-api-index">API #{{ index + 1 }}</span>
+                    <div class="iteration-api-actions">
+                      <button class="btn btn-small btn-secondary" @click="moveIterationApiUp(index)" :disabled="index === 0" title="上移">⬆️</button>
+                      <button class="btn btn-small btn-secondary" @click="moveIterationApiDown(index)" :disabled="index === editingCharacter.iteration_apis.length - 1" title="下移">⬇️</button>
+                      <button class="btn btn-small btn-danger" @click="removeIterationApi(index)" title="删除">🗑️</button>
+                    </div>
+                  </div>
+                  <div class="iteration-api-fields">
+                    <div class="form-row">
+                      <div class="form-group compact">
+                        <label>Provider 类型</label>
+                        <select v-model="api.provider_type" class="input-field">
+                          <option value="openai_compatible">OpenAI 兼容</option>
+                          <option value="ollama">Ollama (本地)</option>
+                        </select>
+                      </div>
+                      <div class="form-group compact">
+                        <label>模型名称</label>
+                        <input v-model="api.model_name" class="input-field" placeholder="gpt-4o-mini" />
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group compact">
+                        <label>Base URL</label>
+                        <input v-model="api.base_url" class="input-field" placeholder="https://api.openai.com/v1" />
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group compact">
+                        <label>API Key</label>
+                        <input v-model="api.api_key" type="password" class="input-field" placeholder="sk-..." />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <template v-if="editingCharacter.iteration_provider_type === 'openai_compatible'">
-                  <div class="form-group">
-                    <label>Base URL</label>
-                    <input
-                      v-model="editingCharacter.iteration_base_url"
-                      type="text"
-                      class="input-field"
-                      placeholder="https://openrouter.ai/api/v1"
-                    />
-                  </div>
-                  <div class="form-group">
-                    <label>API Key</label>
-                    <input
-                      v-model="editingCharacter.iteration_api_key"
-                      type="password"
-                      class="input-field"
-                      :placeholder="editingCharacter.has_iteration_api_key ? '输入新的 API Key 以替换' : 'sk-...'"
-                    />
-                  </div>
-                  <div class="form-group">
-                    <label>模型名称</label>
-                    <input
-                      v-model="editingCharacter.iteration_model_name"
-                      type="text"
-                      class="input-field"
-                      placeholder="google/gemma-3-1b-it:free"
-                    />
-                  </div>
-                </template>
+
+                <button class="btn btn-secondary" @click="addIterationApi" style="margin-top: 8px;">
+                  ➕ 新增迭代 API
+                </button>
               </template>
             </div>
           </div>
@@ -511,11 +519,7 @@ function selectCharacter(char) {
     has_api_key: char.api_config?.has_api_key || false,
     api_model_name: char.api_config?.model_name || '',
     use_main_api_for_iteration: !iterationConfig,
-    iteration_provider_type: iterationConfig?.provider_type || 'ollama',
-    iteration_base_url: iterationConfig?.base_url || '',
-    iteration_api_key: iterationConfig?.api_key || '',
-    has_iteration_api_key: iterationConfig?.has_api_key || false,
-    iteration_model_name: iterationConfig?.model_name || '',
+    iteration_apis: char.iteration_apis || [],
     use_main_api_for_emotion: !emotionConfig,
     emotion_provider_type: emotionConfig?.provider_type || 'ollama',
     emotion_base_url: emotionConfig?.base_url || '',
@@ -552,11 +556,7 @@ function newCharacter() {
     has_api_key: false,
     api_model_name: '',
     use_main_api_for_iteration: true,
-    iteration_provider_type: 'ollama',
-    iteration_base_url: '',
-    iteration_api_key: '',
-    has_iteration_api_key: false,
-    iteration_model_name: '',
+    iteration_apis: [],
     use_main_api_for_emotion: true,
     emotion_provider_type: 'ollama',
     emotion_base_url: '',
@@ -591,8 +591,44 @@ function onProviderChange() {
 
 function onIterationApiToggle() {
   const char = editingCharacter.value
-  if (!char.use_main_api_for_iteration && char.iteration_provider_type === 'openai_compatible' && !char.iteration_base_url) {
-    char.iteration_base_url = 'https://openrouter.ai/api/v1'
+  if (!char.use_main_api_for_iteration && char.iteration_apis.length === 0) {
+    char.iteration_apis.push({
+      provider_type: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: '',
+      model_name: ''
+    })
+  }
+}
+
+function addIterationApi() {
+  editingCharacter.value.iteration_apis.push({
+    provider_type: 'openai_compatible',
+    base_url: '',
+    api_key: '',
+    model_name: ''
+  })
+}
+
+function removeIterationApi(index) {
+  editingCharacter.value.iteration_apis.splice(index, 1)
+}
+
+function moveIterationApiUp(index) {
+  if (index > 0) {
+    const apis = editingCharacter.value.iteration_apis
+    const temp = apis[index]
+    apis[index] = apis[index - 1]
+    apis[index - 1] = temp
+  }
+}
+
+function moveIterationApiDown(index) {
+  const apis = editingCharacter.value.iteration_apis
+  if (index < apis.length - 1) {
+    const temp = apis[index]
+    apis[index] = apis[index + 1]
+    apis[index + 1] = temp
   }
 }
 
@@ -677,10 +713,10 @@ async function saveCharacter() {
     const isMaskedKey = (key) => key && key.startsWith('*')
     
     const iterationApiConfig = editingCharacter.value.use_main_api_for_iteration ? null : {
-      provider_type: editingCharacter.value.iteration_provider_type || 'ollama',
-      base_url: editingCharacter.value.iteration_base_url || '',
-      api_key: isMaskedKey(editingCharacter.value.iteration_api_key) ? '' : (editingCharacter.value.iteration_api_key || ''),
-      model_name: editingCharacter.value.iteration_model_name || ''
+      provider_type: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].provider_type : 'ollama',
+      base_url: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].base_url : '',
+      api_key: editingCharacter.value.iteration_apis.length > 0 ? (isMaskedKey(editingCharacter.value.iteration_apis[0].api_key) ? '' : (editingCharacter.value.iteration_apis[0].api_key || '')) : '',
+      model_name: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].model_name : ''
     }
     const emotionApiConfig = editingCharacter.value.use_main_api_for_emotion ? null : {
       provider_type: editingCharacter.value.emotion_provider_type || 'ollama',
@@ -698,6 +734,7 @@ async function saveCharacter() {
         model_name: editingCharacter.value.api_model_name || ''
       },
       iteration_api_config: iterationApiConfig,
+      iteration_apis: editingCharacter.value.iteration_apis || [],
       emotion_api_config: emotionApiConfig,
       greeting_templates: {
         morning: editingCharacter.value.greeting_morning || '',
@@ -715,10 +752,7 @@ async function saveCharacter() {
     delete payload.greeting_evening
     delete payload.greeting_night
     delete payload.use_main_api_for_iteration
-    delete payload.iteration_provider_type
-    delete payload.iteration_base_url
-    delete payload.iteration_api_key
-    delete payload.iteration_model_name
+    delete payload.has_iteration_api_key
     delete payload.use_main_api_for_emotion
     delete payload.emotion_provider_type
     delete payload.emotion_base_url
@@ -1309,6 +1343,65 @@ function showMessage(text, type = 'info') {
   border-radius: 6px;
   font-size: 13px;
   cursor: default;
+}
+
+.section-hint {
+  color: #888;
+  font-size: 12px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.iteration-api-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.iteration-api-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.iteration-api-index {
+  font-weight: 600;
+  color: #81c784;
+  font-size: 13px;
+}
+
+.iteration-api-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.iteration-api-actions .btn-small {
+  padding: 2px 6px;
+  font-size: 12px;
+  min-width: auto;
+}
+
+.iteration-api-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-group.compact {
+  margin-bottom: 0;
+}
+
+.form-group.compact label {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.form-group.compact .input-field {
+  font-size: 13px;
+  padding: 6px 8px;
 }
 
 </style>

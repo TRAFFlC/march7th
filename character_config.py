@@ -115,6 +115,7 @@ class CharacterConfig:
     memory_config: MemoryConfig = field(default_factory=MemoryConfig)
     api_config: APIConfig = field(default_factory=APIConfig)
     iteration_api_config: Optional[APIConfig] = None
+    iteration_apis: List[Dict[str, str]] = field(default_factory=list)
     emotion_api_config: Optional[APIConfig] = None
     emotion_images: Dict[str, str] = field(default_factory=lambda: {
         "neutral": "", "happy": "", "confused": "", "sad": "", "angry": "", "excited": ""
@@ -143,6 +144,7 @@ class CharacterConfig:
             "memory_config": asdict(self.memory_config),
             "api_config": asdict(self.api_config),
             "iteration_api_config": asdict(self.iteration_api_config) if self.iteration_api_config else None,
+            "iteration_apis": self.iteration_apis,
             "emotion_api_config": asdict(self.emotion_api_config) if self.emotion_api_config else None,
             "emotion_images": self.emotion_images,
             "emotions": emotions_dict,
@@ -159,6 +161,7 @@ class CharacterConfig:
         memory_data = data.get("memory_config", {})
         api_data = data.get("api_config", {})
         iteration_api_data = data.get("iteration_api_config")
+        iteration_apis_data = data.get("iteration_apis", [])
         emotion_api_data = data.get("emotion_api_config")
 
         tts_data_resolved = {
@@ -207,6 +210,7 @@ class CharacterConfig:
             memory_config=MemoryConfig(**memory_data),
             api_config=APIConfig(**api_data),
             iteration_api_config=iteration_api_config,
+            iteration_apis=iteration_apis_data if isinstance(iteration_apis_data, list) else [],
             emotion_api_config=emotion_api_config,
             emotions=emotions_resolved,
             emotion_images=data.get("emotion_images", {
