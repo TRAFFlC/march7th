@@ -29,6 +29,9 @@ from urllib.parse import quote
 
 from personal_config import MYSQL_CONFIG, ADMIN_CONFIG, JWT_CONFIG, PATH_CONFIG
 from security_filter import SecurityFilter
+from logger import get_logger
+
+_log = get_logger()
 
 OLLAMA_PROCESS = None
 _LAST_DEBUG_INFO = None
@@ -40,7 +43,7 @@ def is_ollama_running() -> bool:
     try:
         response = requests.get("http://127.0.0.1:11434/api/tags", timeout=2)
         return response.status_code == 200
-    except:
+    except (requests.RequestException, ConnectionError, OSError):
         return False
 
 
@@ -153,7 +156,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(SecurityHeadersMiddleware)
 
 _cors_origins = getattr(__import__('personal_config'),
-                        'CORS_ALLOWED_ORIGINS', None) or ["*"]
+                        'CORS_ALLOWED_ORIGINS', None) or ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -163,10 +166,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import threading as _threading
+from collections import defaultdict as _defaultdict
+
+_RATE_LIMIT_WINDOW = 60
+_RATE_LIMIT_MAX_REQUESTS = 60
+_rate_limit_store: dict = _defaultdict(list)
+_rate_limit_lock = _threading.Lock()
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+
+        with _rate_limit_lock:
+            requests = _rate_limit_store[client_ip]
+            _rate_limit_store[client_ip] = [t for t in requests if now - t < _RATE_LIMIT_WINDOW]
+            if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX_REQUESTS:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "请求过于频繁，请稍后再试"}
+                )
+            _rate_limit_store[client_ip].append(now)
+
+        response = await call_next(request)
+        return response
+
+
+app.add_middleware(RateLimitMiddleware)
+
 IMAGES_DIR = PATH_CONFIG.get("images_dir", "")
 if IMAGES_DIR and os.path.exists(IMAGES_DIR):
     app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
     print(f"[OK] 静态图片目录已挂载: {IMAGES_DIR}")
+
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+_ALLOWED_AVATAR_DIRS = {
+    str(_PROJECT_ROOT / "frontend" / "public"),
+    str(_PROJECT_ROOT / "resources"),
+}
+
+
+def _validate_avatar_path(avatar_path: Path) -> bool:
+    if ".." in str(avatar_path):
+        return False
+    try:
+        resolved = avatar_path.resolve()
+        allowed_resolved = [Path(d).resolve() for d in _ALLOWED_AVATAR_DIRS]
+        return any(str(resolved).startswith(str(allowed)) for allowed in allowed_resolved)
+    except (OSError, ValueError):
+        return False
 
 
 @app.get("/api/avatar/{character_id}")
@@ -182,6 +235,8 @@ async def get_character_avatar(character_id: str):
         raise HTTPException(status_code=404, detail="Avatar not found")
     
     avatar_path = Path(char.avatar_path)
+    if not _validate_avatar_path(avatar_path):
+        raise HTTPException(status_code=403, detail="Invalid avatar path")
     if not avatar_path.exists():
         if default_avatar.exists():
             return FileResponse(default_avatar, media_type="image/png")
@@ -213,6 +268,8 @@ async def get_template_avatar(template_id: str):
         raise HTTPException(status_code=404, detail="Template avatar not found")
     
     avatar_path = Path(template["avatar_path"])
+    if not _validate_avatar_path(avatar_path):
+        raise HTTPException(status_code=403, detail="Invalid avatar path")
     if not avatar_path.exists():
         if default_avatar.exists():
             return FileResponse(default_avatar, media_type="image/png")
@@ -233,9 +290,20 @@ async def get_template_avatar(template_id: str):
 
 security = HTTPBearer()
 
-JWT_SECRET = JWT_CONFIG.get("secret", "march7th_secret_key_2024")
+JWT_SECRET = JWT_CONFIG.get("secret", "")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = JWT_CONFIG.get("expire_hours", 24)
+
+_WEAK_JWT_SECRETS = {
+    "march7th_secret_key_2024", "your-secret-key-here", "your_jwt_secret_here",
+    "secret", "changeme", "password", "jwt_secret",
+}
+
+if not JWT_SECRET or JWT_SECRET in _WEAK_JWT_SECRETS or len(JWT_SECRET) < 32:
+    import secrets as _secrets
+    JWT_SECRET = _secrets.token_urlsafe(48)
+    if __name__ == "__main__":
+        print(f"[SECURITY] JWT_SECRET 未配置或过弱（当前值长度={len(JWT_CONFIG.get('secret', ''))}，要求≥32），已自动生成安全密钥。请在 .env 中设置 JWT_SECRET 以持久化。")
 
 
 def get_config_manager():
@@ -375,21 +443,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return payload
 
 
-async def get_current_user_from_query(token: Optional[str] = None) -> dict:
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="缺少认证令牌",
-        )
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效或过期的令牌",
-        )
-    return payload
-
-
 @app.get("/")
 async def root():
     return {"message": "三月七语音对话系统 API", "version": "2.0.0"}
@@ -493,6 +546,7 @@ async def update_user_profile(data: UserProfileUpdate, user: dict = Depends(get_
 
 SHARED_TOKEN_FILE = os.path.join(
     os.path.dirname(__file__), '..', 'shared_token.json')
+SHARED_TOKEN_MAX_AGE_SECONDS = 300
 
 
 @app.post("/api/auth/share-token")
@@ -500,7 +554,8 @@ async def share_token(user: dict = Depends(get_current_user)):
     token = create_token(user['user_id'], user['username'], user['role'])
     data = {
         "token": token,
-        "user": user
+        "user": user,
+        "created_at": datetime.utcnow().isoformat(),
     }
     with open(SHARED_TOKEN_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False)
@@ -515,8 +570,17 @@ async def get_shared_token():
     try:
         with open(SHARED_TOKEN_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
+        created_at_str = data.get("created_at")
+        if created_at_str:
+            created_at = datetime.fromisoformat(created_at_str)
+            age_seconds = (datetime.utcnow() - created_at).total_seconds()
+            if age_seconds > SHARED_TOKEN_MAX_AGE_SECONDS:
+                os.remove(SHARED_TOKEN_FILE)
+                return {"success": False, "message": "Shared token expired"}
+
         return {"success": True, "token": data.get("token"), "user": data.get("user")}
-    except:
+    except (json.JSONDecodeError, ValueError, OSError):
         return {"success": False, "message": "Failed to read shared token"}
 
 
@@ -922,14 +986,14 @@ async def voice_input(data: VoiceInputRequest, user: dict = Depends(get_current_
         if session_id:
             session = get_session(db, session_id)
             if session and session['user_id'] == user['user_id']:
-                print(f"[Voice] 复用已有会话: {session_id}")
+                _log.debug(f"[Voice] 复用已有会话: {session_id}")
             else:
                 session = None
                 session_id = None
 
         if not session_id:
             session_id = create_session(db, user['user_id'], actual_character_id, title=data.message.strip()[:50])
-            print(f"[Voice] 创建新会话: {session_id}")
+            _log.debug(f"[Voice] 创建新会话: {session_id}")
 
         if session_id and session:
             controller.switch_session(session_id, user['user_id'])
@@ -990,31 +1054,31 @@ async def stream_chat_response(
 ) -> AsyncGenerator[str, None]:
     from database import get_db, create_session, get_session, update_session
 
-    print(f"[API] stream_chat_response called with session_id: {session_id}")
+    _log.debug(f"[API] stream_chat_response called with session_id: {session_id}")
     db = get_db()
     actual_session_id = session_id
     session = None
 
     if actual_session_id:
         session = get_session(db, actual_session_id)
-        print(
+        _log.debug(
             f"[API] Found session: {session is not None}, user_id match: {session and session['user_id'] == user_id}")
         if not session or session['user_id'] != user_id:
             actual_session_id = None
             session = None
         else:
             controller.switch_session(actual_session_id, user_id)
-            print(f"[API] Switched to session: {actual_session_id}")
+            _log.debug(f"[API] Switched to session: {actual_session_id}")
 
     if not actual_session_id:
         actual_character_id = character_id or controller.get_current_character_id()
         if actual_character_id:
             actual_session_id = create_session(
                 db, user_id, actual_character_id)
-            print(
+            _log.debug(
                 f"[API] Created new session: {actual_session_id} for character: {actual_character_id}")
         else:
-            print(
+            _log.warning(
                 f"[API] Warning: No character_id available, session will not be created")
 
     try:
@@ -1094,46 +1158,6 @@ async def chat_stream(data: ChatRequest, user: dict = Depends(get_current_user))
     )
 
 
-@app.get("/api/chat/stream")
-async def chat_stream_get(
-    message: str,
-    token: str,
-    character_id: Optional[str] = None,
-    model: Optional[str] = None,
-    temperature: Optional[float] = 1.0,
-    top_p: Optional[float] = 0.9,
-    emotion: Optional[str] = None,
-    session_id: Optional[str] = None,
-):
-    user = await get_current_user_from_query(token)
-    from voice_chat import get_controller
-
-    if not message or not message.strip():
-        raise HTTPException(status_code=400, detail="消息不能为空")
-
-    controller = get_controller(character_id=character_id)
-
-    return StreamingResponse(
-        stream_chat_response(
-            controller=controller,
-            user_input=message.strip(),
-            character_id=character_id,
-            model_name=model,
-            temperature=temperature,
-            top_p=top_p,
-            user_id=user['user_id'],
-            emotion=emotion,
-            session_id=session_id,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
-
-
 class LLMChatRequest(BaseModel):
     message: str
     character_id: Optional[str] = None
@@ -1151,7 +1175,7 @@ async def llm_chat(data: LLMChatRequest, user: dict = Depends(get_current_user))
     if not data.message or not data.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
 
-    print(
+    _log.info(
         f"[LLM Chat] 收到请求: model={data.model}, character_id={data.character_id}, use_rag={data.use_rag}")
 
     try:
@@ -1165,18 +1189,13 @@ async def llm_chat(data: LLMChatRequest, user: dict = Depends(get_current_user))
             use_rag=data.use_rag,
         )
 
-        print(
+        _log.info(
             f"[LLM Chat] 成功: model={debug_info.get('model')}, response_time={debug_info.get('response_time')}")
 
         if response_text:
-            try:
-                preview = response_text[:100].encode(
-                    'utf-8', errors='replace').decode('utf-8')
-                print(f"[LLM Chat] 回复内容: {preview}...")
-            except:
-                print(f"[LLM Chat] 回复内容: (无法显示，长度={len(response_text)})")
+            _log.debug(f"[LLM Chat] 回复长度: {len(response_text)}")
         else:
-            print(f"[LLM Chat] 回复内容: EMPTY")
+            _log.debug("[LLM Chat] 回复内容: EMPTY")
 
         db = get_db()
         save_llm_test_conversation(
@@ -1211,7 +1230,7 @@ async def llm_chat(data: LLMChatRequest, user: dict = Depends(get_current_user))
         }
     except Exception as e:
         import traceback
-        print(f"[LLM Chat] 错误: {e}")
+        _log.error(f"[LLM Chat] 错误: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="LLM对话处理失败")
 
@@ -1245,7 +1264,7 @@ async def llm_chat_direct(data: LLMChatDirectRequest, user: dict = Depends(get_c
     if not data.message or not data.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
 
-    print(
+    _log.info(
         f"[LLM Chat Direct] 收到请求: provider={data.provider_type}, model={data.model_name}")
 
     try:
@@ -1285,7 +1304,7 @@ async def llm_chat_direct(data: LLMChatDirectRequest, user: dict = Depends(get_c
         response_text = result.get("content", "")
         usage = result.get("usage", {})
 
-        print(f"[LLM Chat Direct] 成功: response_time={response_time:.2f}s")
+        _log.info(f"[LLM Chat Direct] 成功: response_time={response_time:.2f}s")
 
         return {
             "success": True,
@@ -1303,7 +1322,7 @@ async def llm_chat_direct(data: LLMChatDirectRequest, user: dict = Depends(get_c
         raise
     except Exception as e:
         import traceback
-        print(f"[LLM Chat Direct] 错误: {e}")
+        _log.error(f"[LLM Chat Direct] 错误: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="LLM对话处理失败")
 
@@ -1401,6 +1420,9 @@ async def rate_conversation(data: RatingRequest, user: dict = Depends(get_curren
     if not conv:
         raise HTTPException(status_code=404, detail="对话记录不存在")
 
+    if conv.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail="无权操作此对话")
+
     success = update_rating(db, data.conversation_id, data.rating)
     if not success:
         raise HTTPException(status_code=500, detail="评分保存失败")
@@ -1443,6 +1465,9 @@ async def submit_feedback_detail(data: FeedbackDetailRequest, user: dict = Depen
     conv = get_conversation_by_id(db, data.conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="对话记录不存在")
+
+    if conv.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail="无权操作此对话")
 
     manager = CharacterConfigManager()
     char = manager.get_character(conv.get('character', ''))
@@ -1514,10 +1539,14 @@ async def get_feedback_stats(user: dict = Depends(get_current_user), model_name:
 
 @app.get("/api/rag/iteration/{conversation_id}")
 async def get_rag_iteration(conversation_id: int, user: dict = Depends(get_current_user)):
-    from database import get_db, get_feedback_details
+    from database import get_db, get_feedback_details, get_conversation_by_id
 
     db = get_db()
-    feedbacks = get_feedback_details(db, conversation_id=conversation_id, limit=1)
+    conv = get_conversation_by_id(db, conversation_id)
+    if conv and conv.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail="无权访问此对话")
+
+    feedbacks = get_feedback_details(db, conversation_id=conversation_id, user_id=user['user_id'], limit=1)
     
     if not feedbacks:
         return {"success": True, "has_result": False}
@@ -1547,6 +1576,9 @@ async def trigger_rag_iteration(data: RAGIterationRequest, user: dict = Depends(
     conv = get_conversation_by_id(db, data.conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
+
+    if conv.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail="无权操作此对话")
 
     manager = CharacterConfigManager()
     char = manager.get_character(conv.get('character', ''))
@@ -1631,7 +1663,7 @@ async def edit_and_confirm_rag_iteration(data: RAGEditConfirmRequest, user: dict
                     (data.edited_suggestion, data.feedback_detail_id)
                 )
         except Exception as e:
-            print(f"[RAG Edit] 更新建议内容失败: {e}")
+            _log.error(f"[RAG Edit] 更新建议内容失败: {e}")
             raise HTTPException(status_code=500, detail="更新建议内容失败")
 
     success = confirm_feedback_detail(db, data.feedback_detail_id, user['user_id'])
@@ -1715,7 +1747,7 @@ async def confirm_rag_iteration(data: RAGConfirmRequest, user: dict = Depends(ge
                     update_feedback_rag_status(
                         db, data.feedback_detail_id, True)
         except Exception as e:
-            print(f"[RAG Confirm] 添加知识条目失败: {e}")
+            _log.error(f"[RAG Confirm] 添加知识条目失败: {e}")
 
     return {
         "success": True,
@@ -1804,7 +1836,7 @@ async def update_rag_knowledge(user: dict = Depends(get_current_user)):
                 if isinstance(context_snapshot, str):
                     try:
                         context_snapshot = json.loads(context_snapshot)
-                    except:
+                    except (json.JSONDecodeError, TypeError):
                         context_snapshot = {}
 
                 user_input = context_snapshot.get(
@@ -1919,6 +1951,7 @@ async def delete_rag(collection_name: str, user: dict = Depends(get_current_user
 
 @app.get("/api/chat/history")
 async def get_chat_history(user: dict = Depends(get_current_user), limit: int = 20):
+    limit = max(1, min(limit, 200))
     from database import get_db, get_conversations
 
     db = get_db()
@@ -1965,6 +1998,7 @@ async def create_session(data: SessionCreate, user: dict = Depends(get_current_u
 
 @app.get("/api/sessions")
 async def get_sessions(user: dict = Depends(get_current_user), limit: int = 50):
+    limit = max(1, min(limit, 500))
     from database import get_db, get_user_sessions
 
     db = get_db()
@@ -2432,28 +2466,45 @@ async def get_system_status(user: dict = Depends(get_current_user)):
 async def get_background_images():
     import glob
     images_dir = PATH_CONFIG.get("images_dir", "")
-    print(f"[Background] 检查目录: {images_dir}")
+    _log.debug(f"[Background] 检查目录: {images_dir}")
 
     if not os.path.exists(images_dir):
-        print(f"[Background] 目录不存在: {images_dir}")
+        _log.debug(f"[Background] 目录不存在: {images_dir}")
         return {"success": False, "images": []}
 
     patterns = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
     images = []
     for pattern in patterns:
         found = glob.glob(os.path.join(images_dir, pattern))
-        print(f"[Background] 模式 {pattern} 找到 {len(found)} 个文件")
+        _log.debug(f"[Background] 模式 {pattern} 找到 {len(found)} 个文件")
         images.extend(found)
 
-    print(f"[Background] 总共找到 {len(images)} 个图片文件")
+    _log.debug(f"[Background] 总共找到 {len(images)} 个图片文件")
 
     image_names = [os.path.basename(f) for f in images]
-    print(f"[Background] 使用全部 {len(image_names)} 个图片")
+    _log.debug(f"[Background] 使用全部 {len(image_names)} 个图片")
 
     image_urls = [f"/images/{quote(name)}" for name in image_names[:20]]
-    print(f"[Background] 返回 {len(image_urls)} 个URL")
+    _log.debug(f"[Background] 返回 {len(image_urls)} 个URL")
 
     return {"success": True, "images": image_urls}
+
+
+_SENSITIVE_DEBUG_KEYS = {"full_prompt", "raw_output", "messages", "system_prompt", "api_key"}
+
+
+def _sanitize_debug_info(info: dict) -> dict:
+    if not info or not isinstance(info, dict):
+        return info
+    sanitized = {}
+    for key, value in info.items():
+        if key in _SENSITIVE_DEBUG_KEYS:
+            sanitized[key] = "[REDACTED]"
+        elif isinstance(value, dict):
+            sanitized[key] = _sanitize_debug_info(value)
+        else:
+            sanitized[key] = value
+    return sanitized
 
 
 @app.get("/api/debug-info")
@@ -2469,7 +2520,7 @@ async def get_debug_info(user: dict = Depends(get_current_user)):
 
     return {
         "success": True,
-        "debug_info": _LAST_DEBUG_INFO
+        "debug_info": _sanitize_debug_info(_LAST_DEBUG_INFO)
     }
 
 

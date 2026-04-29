@@ -765,6 +765,10 @@ function closeEventSource() {
     eventSource.close()
     eventSource = null
   }
+  if (window._sseAbortController) {
+    window._sseAbortController.abort()
+    window._sseAbortController = null
+  }
 }
 
 async function startAudioVisualization() {
@@ -879,89 +883,103 @@ function connectSSE(message) {
   closeEventSource()
   
   const token = localStorage.getItem('token') || ''
-  const params = new URLSearchParams({
-    message: message,
-    token: token,
-    character_id: selectedCharacter.value || '',
-    session_id: currentSessionId.value || ''
-  })
-  
   const baseUrl = api.defaults?.baseURL || ''
-  const url = `${baseUrl}/api/chat/stream?${params.toString()}`
-  
-  eventSource = new EventSource(url)
+  const url = `${baseUrl}/api/chat/stream`
   
   let currentMessageIndex = messages.value.length - 1
+  let abortController = new AbortController()
+  window._sseAbortController = abortController
   
-  eventSource.onopen = () => {
+  fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      message: message,
+      character_id: selectedCharacter.value || '',
+      session_id: currentSessionId.value || ''
+    }),
+    signal: abortController.signal
+  }).then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
     reconnectAttempts = 0
-  }
-  
-  eventSource.addEventListener('text', (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (data.content) {
-        if (messages.value[currentMessageIndex]) {
-          messages.value[currentMessageIndex].content += data.content
-          messages.value[currentMessageIndex].isStreaming = true
-        }
-        scrollToBottom()
+    
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    
+    function processChunk({ done, value }) {
+      if (done) {
+        return
       }
-    } catch (e) {
-      console.error('Failed to parse text event:', e)
-    }
-  })
-  
-  eventSource.addEventListener('audio', (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (data.audio) {
-        const audioUrl = `data:audio/wav;base64,${data.audio}`
-        audioQueue.value.push(audioUrl)
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const dataStr = line.slice(6)
+        if (dataStr.trim() === '[DONE]') continue
         
-        if (!isPlayingAudio.value) {
-          playNextAudio()
+        let eventType = 'text'
+        const eventMatch = line.match(/^event:\s*(\w+)/)
+        if (eventMatch) eventType = eventMatch[1]
+        
+        try {
+          const data = JSON.parse(dataStr)
+          
+          if (eventType === 'text' || (data.content !== undefined)) {
+            if (data.content) {
+              if (messages.value[currentMessageIndex]) {
+                messages.value[currentMessageIndex].content += data.content
+                messages.value[currentMessageIndex].isStreaming = true
+              }
+              scrollToBottom()
+            }
+          } else if (eventType === 'audio' || data.audio) {
+            if (data.audio) {
+              const audioUrl = `data:audio/wav;base64,${data.audio}`
+              audioQueue.value.push(audioUrl)
+              if (!isPlayingAudio.value) {
+                playNextAudio()
+              }
+            }
+          } else if (eventType === 'done' || data.conversation_id) {
+            if (messages.value[currentMessageIndex]) {
+              messages.value[currentMessageIndex].isStreaming = false
+            }
+            lastConversationId.value = data.conversation_id
+            if (data.session_id && !currentSessionId.value) {
+              currentSessionId.value = data.session_id
+              loadSessions()
+            }
+            loading.value = false
+            closeEventSource()
+          } else if (eventType === 'error' || data.message) {
+            if (messages.value[currentMessageIndex]) {
+              messages.value[currentMessageIndex].content = `错误: ${data.message || '流式传输失败'}`
+              messages.value[currentMessageIndex].isStreaming = false
+            }
+            loading.value = false
+            closeEventSource()
+          }
+        } catch (e) {
+          // ignore parse errors for partial data
         }
       }
-    } catch (e) {
-      console.error('Failed to parse audio event:', e)
+      
+      return reader.read().then(processChunk)
     }
-  })
-  
-  eventSource.addEventListener('done', (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (messages.value[currentMessageIndex]) {
-        messages.value[currentMessageIndex].isStreaming = false
-      }
-      lastConversationId.value = data.conversation_id
-      if (data.session_id && !currentSessionId.value) {
-        currentSessionId.value = data.session_id
-        loadSessions()
-      }
-      loading.value = false
-      closeEventSource()
-    } catch (e) {
-      console.error('Failed to parse done event:', e)
-    }
-  })
-  
-  eventSource.addEventListener('error', (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (messages.value[currentMessageIndex]) {
-        messages.value[currentMessageIndex].content = `错误: ${data.message || '流式传输失败'}`
-        messages.value[currentMessageIndex].isStreaming = false
-      }
-      loading.value = false
-      closeEventSource()
-    } catch (e) {
-      console.error('Failed to parse error event:', e)
-    }
-  })
-  
-  eventSource.onerror = (error) => {
-    console.error('EventSource error:', error)
+    
+    return reader.read().then(processChunk)
+  }).catch(error => {
+    if (error.name === 'AbortError') return
+    console.error('SSE fetch error:', error)
     
     if (reconnectAttempts < maxReconnectAttempts) {
       reconnectAttempts++
@@ -977,7 +995,7 @@ function connectSSE(message) {
       loading.value = false
       closeEventSource()
     }
-  }
+  })
 }
 
 async function playNextAudio() {

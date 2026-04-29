@@ -78,4 +78,5 @@ LLM_MAX_TOKENS = int(_env("LLM_MAX_TOKENS", "1024"))
 OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY", "")
 
 _is_production = _env("MARCH7TH_ENV", "development") == "production"
-CORS_ALLOWED_ORIGINS = ["*"] if not _is_production else _env("CORS_ALLOWED_ORIGINS", "http://localhost:7860").split(",")
+_default_dev_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
+CORS_ALLOWED_ORIGINS = _env("CORS_ALLOWED_ORIGINS", _default_dev_origins).split(",")

@@ -12,6 +12,13 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import bcrypt
 
+try:
+    from dbutils.pooled_db import PooledDB
+    _HAS_POOL = True
+except ImportError:
+    PooledDB = None
+    _HAS_POOL = False
+
 from personal_config import MYSQL_CONFIG
 
 
@@ -32,16 +39,51 @@ class DatabaseManager:
     def __init__(self, config: dict = None):
         self.config = config or MYSQL_CONFIG
         self._create_database_if_not_exists()
-        self.connection = pymysql.connect(
-            host=self.config['host'],
-            port=self.config['port'],
-            user=self.config['user'],
-            password=self.config['password'],
-            database=self.config['database'],
-            charset=self.config.get('charset', 'utf8mb4'),
-            cursorclass=DictCursor,
-            autocommit=False
-        )
+        if _HAS_POOL:
+            try:
+                self._pool = PooledDB(
+                    creator=pymysql,
+                    maxconnections=10,
+                    mincached=2,
+                    maxcached=5,
+                    blocking=True,
+                    maxusage=0,
+                    setsession=[],
+                    ping=1,
+                    host=self.config['host'],
+                    port=self.config['port'],
+                    user=self.config['user'],
+                    password=self.config['password'],
+                    database=self.config['database'],
+                    charset=self.config.get('charset', 'utf8mb4'),
+                    cursorclass=DictCursor,
+                    autocommit=False,
+                )
+                self.connection = self._pool.connection()
+            except Exception:
+                self._pool = None
+                self.connection = pymysql.connect(
+                    host=self.config['host'],
+                    port=self.config['port'],
+                    user=self.config['user'],
+                    password=self.config['password'],
+                    database=self.config['database'],
+                    charset=self.config.get('charset', 'utf8mb4'),
+                    cursorclass=DictCursor,
+                    autocommit=False
+                )
+        else:
+            self._pool = None
+            self.connection = pymysql.connect(
+                host=self.config['host'],
+                port=self.config['port'],
+                user=self.config['user'],
+                password=self.config['password'],
+                database=self.config['database'],
+                charset=self.config.get('charset', 'utf8mb4'),
+                cursorclass=DictCursor,
+                autocommit=False
+            )
         self.create_tables()
         self._create_default_admin()
     
@@ -297,6 +339,7 @@ class DatabaseManager:
     
     @contextmanager
     def get_cursor(self):
+        self._ensure_connection()
         cursor = self.connection.cursor()
         try:
             yield cursor
@@ -307,6 +350,29 @@ class DatabaseManager:
 
     def get_connection(self):
         return self.connection
+
+    def get_pooled_connection(self):
+        if self._pool:
+            return self._pool.connection()
+        return self.connection
+
+    def _ensure_connection(self):
+        try:
+            self.connection.ping(reconnect=True)
+        except Exception:
+            if self._pool:
+                self.connection = self._pool.connection()
+            else:
+                self.connection = pymysql.connect(
+                    host=self.config['host'],
+                    port=self.config['port'],
+                    user=self.config['user'],
+                    password=self.config['password'],
+                    database=self.config['database'],
+                    charset=self.config.get('charset', 'utf8mb4'),
+                    cursorclass=DictCursor,
+                    autocommit=False
+                )
     
     def close(self):
         if self.connection:

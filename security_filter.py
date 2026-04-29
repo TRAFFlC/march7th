@@ -13,6 +13,14 @@ SECURITY_PATTERNS = [
     {"pattern": r"\[INST\]", "type": "token_injection", "severity": "high"},
     {"pattern": r"reveal\s+your\s+(system|initial)\s+prompt", "type": "info_extraction", "severity": "medium"},
     {"pattern": r"show\s+me\s+your\s+instructions", "type": "info_extraction", "severity": "medium"},
+    {"pattern": r"from\s+now\s+on\s+you\s+are", "type": "role_hijack", "severity": "high"},
+    {"pattern": r"act\s+as\s+(if\s+you\s+(are|were)|a|an)", "type": "role_hijack", "severity": "medium"},
+    {"pattern": r"bypass\s+(all\s+)?(restrictions|safety|filters|rules)", "type": "jailbreak", "severity": "high"},
+    {"pattern": r"developer\s+mode", "type": "jailbreak", "severity": "high"},
+    {"pattern": r"ignore\s+(all\s+)?(safety|security)\s+rules", "type": "jailbreak", "severity": "high"},
+    {"pattern": r"tell\s+me\s+your\s+(system|initial|original)\s+prompt", "type": "info_extraction", "severity": "medium"},
+    {"pattern": r"output\s+your\s+prompt", "type": "info_extraction", "severity": "medium"},
+    {"pattern": r"display\s+your\s+instructions", "type": "info_extraction", "severity": "medium"},
 ]
 
 SECURITY_KEYWORDS = [
@@ -22,6 +30,18 @@ SECURITY_KEYWORDS = [
     {"keyword": "解除限制", "type": "jailbreak", "severity": "high"},
     {"keyword": "绕过限制", "type": "jailbreak", "severity": "high"},
     {"keyword": "系统提示", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "你现在是", "type": "role_hijack", "severity": "high"},
+    {"keyword": "假装你是", "type": "role_hijack", "severity": "high"},
+    {"keyword": "从现在起你是", "type": "role_hijack", "severity": "high"},
+    {"keyword": "忽略以上设定", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "忽略以上指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "告诉我你的指令", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "显示系统提示", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "输出你的prompt", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "输出你的提示", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "解除所有限制", "type": "jailbreak", "severity": "high"},
+    {"keyword": "忽略安全规则", "type": "jailbreak", "severity": "high"},
+    {"keyword": "开发者模式", "type": "jailbreak", "severity": "high"},
 ]
 
 
