@@ -1237,7 +1237,7 @@ async def chat(data: ChatRequest, request: Request, response: Response, user: di
             if session['user_id'] != user['user_id']:
                 raise HTTPException(status_code=403, detail="无权访问该会话")
 
-        controller = get_controller(character_id=data.character_id)
+        controller = get_controller(user_id=user["user_id"], character_id=data.character_id)
 
         if not session_id:
             actual_character_id = data.character_id or controller.get_current_character_id()
@@ -1324,7 +1324,7 @@ async def voice_input(data: VoiceInputRequest, user: dict = Depends(get_current_
         }
 
     try:
-        controller = get_controller(character_id=data.character_id)
+        controller = get_controller(user_id=user["user_id"], character_id=data.character_id)
         db = get_db()
 
         actual_character_id = data.character_id or controller.get_current_character_id()
@@ -1513,7 +1513,7 @@ async def chat_stream(data: ChatRequest, request: Request, response: Response, u
             media_type="text/event-stream",
         )
 
-    controller = get_controller(character_id=data.character_id)
+    controller = get_controller(user_id=user["user_id"], character_id=data.character_id)
 
     return StreamingResponse(
         stream_chat_response(
@@ -1557,7 +1557,7 @@ async def llm_chat(data: LLMChatRequest, user: dict = Depends(get_current_user))
         "[LLM Chat] 收到请求: model=%s, character_id=%s, use_rag=%s", data.model, data.character_id, data.use_rag)
 
     try:
-        controller = get_controller(character_id=data.character_id)
+        controller = get_controller(user_id=user["user_id"], character_id=data.character_id)
 
         response_text, debug_info = controller.llm_chat(
             data.message.strip(),
@@ -1629,7 +1629,7 @@ async def llm_chat(data: LLMChatRequest, user: dict = Depends(get_current_user))
 async def llm_clear(user: dict = Depends(get_current_user)):
     from voice_chat import get_controller
 
-    controller = get_controller()
+    controller = get_controller(user_id=user["user_id"])
     controller.clear_history()
 
     return {"success": True, "message": "LLM历史已清除"}
@@ -2454,7 +2454,7 @@ async def restore_session(session_id: str, user: dict = Depends(get_current_user
     if session['user_id'] != user['user_id']:
         raise HTTPException(status_code=403, detail="无权访问该会话")
 
-    controller = get_controller()
+    controller = get_controller(user_id=user["user_id"])
     success = controller.switch_session(session_id, user['user_id'])
 
     if not success:
@@ -2522,7 +2522,7 @@ async def search_user_conversations(keyword: Optional[str] = None, character: Op
 async def clear_chat_history(user: dict = Depends(get_current_user)):
     from voice_chat import get_controller
 
-    controller = get_controller()
+    controller = get_controller(user_id=user["user_id"])
     controller.clear_history()
 
     return {"success": True, "message": "对话历史已清除"}
@@ -2576,7 +2576,7 @@ async def text_to_speech(text: str, speed: float = 1.0, emotion: str = "neutral"
         raise HTTPException(status_code=400, detail="文本不能为空")
 
     try:
-        controller = get_controller()
+        controller = get_controller(user_id=user["user_id"])
         audio_bytes = controller.synthesize_audio(
             text.strip(), speed=speed, emotion=emotion, character_id=character_id)
 
@@ -2606,7 +2606,7 @@ async def text_to_speech_emotion(data: TTSEmotionRequest, user: dict = Depends(g
         raise HTTPException(status_code=400, detail="文本不能为空")
 
     try:
-        controller = get_controller()
+        controller = get_controller(user_id=user["user_id"])
         audio_bytes = controller.synthesize_audio(
             data.text.strip(),
             speed=data.speed,
@@ -3186,7 +3186,7 @@ async def pet_emotion_stream(user: dict = Depends(get_current_user)):
         while True:
             try:
                 from voice_chat import get_controller
-                controller = get_controller()
+                controller = get_controller(user_id=user["user_id"])
                 if controller.llm._last_debug_info:
                     current_emotion = controller.llm._last_debug_info.get(
                         "emotion", "neutral")
@@ -3240,7 +3240,7 @@ async def get_system_status(user: dict = Depends(get_current_user)):
     from voice_chat import get_controller
     from tts_service import check_gpu_memory
 
-    controller = get_controller()
+    controller = get_controller(user_id=user["user_id"])
     status = controller.get_status()
 
     return {

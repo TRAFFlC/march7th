@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Optional, List, AsyncGenerator
+from typing import Tuple, Optional, List, Dict, AsyncGenerator
 
 import ollama
 
@@ -777,13 +777,25 @@ class VoiceChatController:
             self._release_llm()
 
 
-_controller_instance: Optional[VoiceChatController] = None
+_controllers: Dict[Tuple[str, str], VoiceChatController] = {}
+_controllers_lock = threading.Lock()
+_MAX_CONTROLLERS = 64
 
 
-def get_controller(character_id: str = None) -> VoiceChatController:
-    global _controller_instance
-    if _controller_instance is None:
-        _controller_instance = VoiceChatController(character_id=character_id)
-    elif character_id and character_id != _controller_instance.current_character_id:
-        _controller_instance.switch_character(character_id)
-    return _controller_instance
+def get_controller(user_id: str = None, character_id: str = None) -> VoiceChatController:
+    """按 (用户, 角色) 隔离控制器实例，避免跨用户共享对话历史/角色状态。
+
+    池大小上限 _MAX_CONTROLLERS，超出后淘汰最早创建的实例。
+    """
+    global _controllers
+    key = (user_id or "default", character_id or "")
+    with _controllers_lock:
+        controller = _controllers.get(key)
+        if controller is None:
+            if len(_controllers) >= _MAX_CONTROLLERS:
+                _controllers.pop(next(iter(_controllers)), None)
+            controller = VoiceChatController(character_id=character_id)
+            _controllers[key] = controller
+        elif character_id and character_id != controller.current_character_id:
+            controller.switch_character(character_id)
+        return controller

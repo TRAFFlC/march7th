@@ -5,6 +5,7 @@ Database Management Module - MySQL Version
 
 import re
 import logging
+import threading
 import pymysql
 from pymysql.cursors import DictCursor
 from datetime import datetime
@@ -35,7 +36,13 @@ class DatabaseManager:
     def __init__(self, config: dict = None):
         self.config = config or MYSQL_CONFIG
         self._create_database_if_not_exists()
-        self.connection = pymysql.connect(
+        self._local = threading.local()
+        self._init_connection()
+        self.create_tables()
+        self._create_default_admin()
+
+    def _connect(self):
+        return pymysql.connect(
             host=self.config['host'],
             port=self.config['port'],
             user=self.config['user'],
@@ -45,8 +52,26 @@ class DatabaseManager:
             cursorclass=DictCursor,
             autocommit=False
         )
-        self.create_tables()
-        self._create_default_admin()
+
+    def _init_connection(self):
+        self._local.connection = self._connect()
+
+    def _get_connection(self):
+        conn = getattr(self._local, 'connection', None)
+        if conn is None:
+            conn = self._connect()
+            self._local.connection = conn
+            return conn
+        try:
+            conn.ping(reconnect=True)
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = self._connect()
+            self._local.connection = conn
+        return conn
     
     def _create_database_if_not_exists(self):
         temp_conn = pymysql.connect(
@@ -69,7 +94,7 @@ class DatabaseManager:
             temp_conn.close()
     
     def create_tables(self):
-        with self.connection.cursor() as cursor:
+        with self._get_connection().cursor() as cursor:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -301,10 +326,10 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ''')
 
-            self.connection.commit()
+            self._get_connection().commit()
     
     def _create_default_admin(self):
-        with self.connection.cursor() as cursor:
+        with self._get_connection().cursor() as cursor:
             cursor.execute("SELECT id FROM users WHERE username = %s", (ADMIN_CONFIG['default_username'],))
             if not cursor.fetchone():
                 password_hash = hash_password(ADMIN_CONFIG['default_password'])
@@ -312,24 +337,29 @@ class DatabaseManager:
                     "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s)",
                     (ADMIN_CONFIG['default_username'], password_hash, 'admin')
                 )
-                self.connection.commit()
+                self._get_connection().commit()
     
     @contextmanager
     def get_cursor(self):
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
         try:
             yield cursor
-            self.connection.commit()
+            self._get_connection().commit()
         except Exception:
-            self.connection.rollback()
+            self._get_connection().rollback()
             raise
 
     def get_connection(self):
-        return self.connection
-    
+        return self._get_connection()
+
     def close(self):
-        if self.connection:
-            self.connection.close()
+        conn = getattr(self._local, 'connection', None)
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.connection = None
 
 
 def create_user(db: DatabaseManager, username: str, password: str, role: str = 'user') -> Optional[int]:
