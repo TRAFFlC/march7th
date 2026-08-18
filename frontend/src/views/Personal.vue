@@ -169,6 +169,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import 'echarts-wordcloud'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/auth'
 

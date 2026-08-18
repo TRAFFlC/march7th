@@ -1451,17 +1451,17 @@ async function fetchRagIteration(forceRegenerate = false) {
         html += `<div class="rag-existing-hint">📄 已保存的分析结果 (${new Date(result.created_at).toLocaleString()})${ragIterationConfirmed.value ? ' ✓ 已确认' : ''}</div>`
         if (typeof analysis === 'object') {
           if (analysis.auto_detected && analysis.analyses) {
-            html += `<div class="rag-auto-detected">🔍 自动检测到 ${Object.keys(analysis.analyses).length} 个潜在问题</div>`
+            html += `<div class="rag-auto-detected">🔍 自动检测到 ${escapeHtml(String(Object.keys(analysis.analyses).length))} 个潜在问题</div>`
             for (const [type, item] of Object.entries(analysis.analyses)) {
-              html += `<div class="rag-item"><strong>${type}</strong>: ${formatAnalysisResult(item)}</div>`
+              html += `<div class="rag-item"><strong>${escapeHtml(type)}</strong>: ${formatAnalysisResult(item)}</div>`
             }
           } else {
             for (const [key, val] of Object.entries(analysis)) {
-              html += `<div class="rag-item"><strong>${key}</strong>: ${formatAnalysisResult(val)}</div>`
+              html += `<div class="rag-item"><strong>${escapeHtml(key)}</strong>: ${formatAnalysisResult(val)}</div>`
             }
           }
         } else {
-          html += analysis
+          html += escapeHtml(analysis)
         }
         html += '</div>'
         ragIterationResult.value = html
@@ -1505,29 +1505,29 @@ async function fetchRagIteration(forceRegenerate = false) {
       html += '<div class="rag-new-hint">✨ 新生成的分析结果</div>'
       if (typeof response.analysis === 'object') {
         if (response.analysis.api_error || response.analysis.error) {
-          html += `<div class="rag-api-error">⚠️ API 错误: ${response.analysis.error || '未知错误'}</div>`
+          html += `<div class="rag-api-error">⚠️ API 错误: ${escapeHtml(String(response.analysis.error || '未知错误'))}</div>`
           html += '<div class="rag-error-hint">请稍后重试，或检查 API 配置是否正确。</div>'
         } else if (response.analysis.parse_error) {
           html += '<div class="rag-parse-error">⚠️ 解析错误: LLM 返回的格式无法识别</div>'
-          html += `<div class="rag-raw-response">${response.analysis.raw_response || ''}</div>`
+          html += `<div class="rag-raw-response">${escapeHtml(String(response.analysis.raw_response || ''))}</div>`
         } else if (response.analysis.auto_detected && response.analysis.analyses) {
-          html += `<div class="rag-auto-detected">🔍 自动检测到 ${Object.keys(response.analysis.analyses).length} 个潜在问题</div>`
+          html += `<div class="rag-auto-detected">🔍 自动检测到 ${escapeHtml(String(Object.keys(response.analysis.analyses).length))} 个潜在问题</div>`
           for (const [type, analysis] of Object.entries(response.analysis.analyses)) {
-            html += `<div class="rag-item"><strong>${type}</strong>: ${formatAnalysisResult(analysis)}</div>`
+            html += `<div class="rag-item"><strong>${escapeHtml(type)}</strong>: ${formatAnalysisResult(analysis)}</div>`
           }
         } else {
           for (const [key, val] of Object.entries(response.analysis)) {
-            html += `<div class="rag-item"><strong>${key}</strong>: ${formatAnalysisResult(val)}</div>`
+            html += `<div class="rag-item"><strong>${escapeHtml(key)}</strong>: ${formatAnalysisResult(val)}</div>`
           }
         }
       } else {
-        html += response.analysis
+        html += escapeHtml(response.analysis)
       }
       html += '</div>'
       ragIterationResult.value = html
     }
   } catch (e) {
-    ragIterationResult.value = `<div class="rag-error">请求失败: ${e.detail || '未知错误'}</div>`
+    ragIterationResult.value = `<div class="rag-error">请求失败: ${escapeHtml(String(e.detail || '未知错误'))}</div>`
   } finally {
     ragIterationLoading.value = false
   }
@@ -1591,25 +1591,25 @@ function continueIterationAnyway() {
 }
 
 function formatAnalysisResult(analysis) {
-  if (typeof analysis === 'string') return analysis
-  if (typeof analysis !== 'object') return String(analysis)
+  if (typeof analysis === 'string') return escapeHtml(analysis)
+  if (typeof analysis !== 'object') return escapeHtml(String(analysis))
   
   let result = ''
   for (const [key, value] of Object.entries(analysis)) {
     if (Array.isArray(value)) {
-      result += `<div class="analysis-array"><em>${key}</em>:<ul>`
+      result += `<div class="analysis-array"><em>${escapeHtml(key)}</em>:<ul>`
       for (const item of value) {
         if (typeof item === 'object') {
-          result += '<li>' + Object.entries(item).map(([k, v]) => `${k}: ${v}`).join(', ') + '</li>'
+          result += '<li>' + Object.entries(item).map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v))}`).join(', ') + '</li>'
         } else {
-          result += `<li>${item}</li>`
+          result += `<li>${escapeHtml(String(item))}</li>`
         }
       }
       result += '</ul></div>'
     } else if (typeof value === 'object') {
-      result += `<div class="analysis-object"><em>${key}</em>: ${JSON.stringify(value)}</div>`
+      result += `<div class="analysis-object"><em>${escapeHtml(key)}</em>: ${escapeHtml(JSON.stringify(value))}</div>`
     } else {
-      result += `<div class="analysis-item"><em>${key}</em>: ${value}</div>`
+      result += `<div class="analysis-item"><em>${escapeHtml(key)}</em>: ${escapeHtml(String(value))}</div>`
     }
   }
   return result

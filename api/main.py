@@ -648,7 +648,10 @@ async def share_token(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/auth/shared-token")
-async def get_shared_token():
+async def get_shared_token(request: Request, response: Response):
+    rate_limiter.check(
+        f"shared_token:{get_client_ip(request)}", limit=10, window_seconds=60, response=response
+    )
     try:
         payload = read_shared_token_payload()
     except HTTPException:
@@ -1488,11 +1491,27 @@ async def stream_chat_response(
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(data: ChatRequest, user: dict = Depends(get_current_user)):
+async def chat_stream(data: ChatRequest, request: Request, response: Response, user: dict = Depends(get_current_user)):
     from voice_chat import get_controller
+
+    rate_limiter.check(
+        f"chat_stream:{user['user_id']}", limit=60, window_seconds=60, response=response
+    )
 
     if not data.message or not data.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
+
+    is_safe, threats = _security_filter.check(data.message.strip())
+    if not is_safe:
+        threat_types = list(set(t["type"] for t in threats))
+        error_data = json.dumps(
+            {"error": "您的输入触发了安全过滤器，请修改后重试。", "security_threats": threat_types},
+            ensure_ascii=False,
+        )
+        return StreamingResponse(
+            iter([f"event: error\ndata: {error_data}\n\n"]),
+            media_type="text/event-stream",
+        )
 
     controller = get_controller(character_id=data.character_id)
 

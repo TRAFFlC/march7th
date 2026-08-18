@@ -7,6 +7,7 @@ const { ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const kwsDetector = require('./kws_detector');
 
 let asrProcess = null;
 let isListening = false;
@@ -41,20 +42,28 @@ function getPythonPath() {
 async function startListening(window) {
     if (isListening) {
         console.log('[ASR] 已经在监听中');
-        return;
+        return { success: true, error: null };
     }
 
     mainWindow = window;
 
     if (!fs.existsSync(ASR_SCRIPT)) {
         console.error('[ASR] Python 脚本不存在:', ASR_SCRIPT);
-        return;
+        return { success: false, error: '语音识别脚本不存在' };
+    }
+
+    try {
+        await kwsDetector.stopListening();
+        console.log('[ASR] 已停止 KWS，释放麦克风');
+    } catch (e) {
+        console.warn('[ASR] 停止 KWS 失败:', e);
     }
 
     const pythonPath = getPythonPath();
     console.log('[ASR] 使用 Python:', pythonPath);
 
     try {
+        let everReady = false;
         asrProcess = spawn(pythonPath, [ASR_SCRIPT], {
             cwd: MODELS_DIR,
             env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
@@ -68,6 +77,7 @@ async function startListening(window) {
                     console.log('[ASR]', msg.status, msg.text || msg.message || '');
                     
                     if (msg.status === 'ready') {
+                        everReady = true;
                         isListening = true;
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('asr-ready', true);
@@ -114,6 +124,9 @@ async function startListening(window) {
             isListening = false;
             asrProcess = null;
             if (mainWindow && !mainWindow.isDestroyed()) {
+                if (!everReady) {
+                    mainWindow.webContents.send('asr-error', `语音识别进程异常退出 (code=${code})，请确认麦克风未被其他程序占用`);
+                }
                 mainWindow.webContents.send('asr-listening', false);
             }
         });
@@ -123,7 +136,9 @@ async function startListening(window) {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('asr-error', e.message);
         }
+        return { success: false, error: e.message };
     }
+    return { success: true, error: null };
 }
 
 function stopListening() {
@@ -176,8 +191,8 @@ function stopListening() {
 function setupIpcHandlers() {
     ipcMain.handle('asr-start', async (event) => {
         const win = require('electron').BrowserWindow.fromWebContents(event.sender);
-        await startListening(win);
-        return { success: true, listening: isListening };
+        const result = await startListening(win);
+        return { success: result.success, listening: isListening, error: result.error };
     });
 
     ipcMain.handle('asr-stop', async () => {
