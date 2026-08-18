@@ -2,26 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '../utils/api'
 
+function readStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null')
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') || null)
-  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
+  const user = ref(readStoredUser())
 
   const isLoggedIn = computed(() => !!token.value)
-
-  async function autoLogin() {
-    try {
-      const response = await api.post('/auth/auto-login')
-      if (response.success) {
-        token.value = response.token
-        user.value = response.user
-        localStorage.setItem('token', response.token)
-        localStorage.setItem('user', JSON.stringify(response.user))
-        try { await api.post('/auth/share-token') } catch (e) {}
-      }
-    } catch (e) {
-      console.error('Auto login failed:', e)
-    }
-  }
+  const isAdmin = computed(() => user.value?.role === 'admin')
 
   async function login(username, password) {
     const response = await api.post('/auth/login', { username, password })
@@ -30,7 +24,23 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.user
       localStorage.setItem('token', response.token)
       localStorage.setItem('user', JSON.stringify(response.user))
-      try { await api.post('/auth/share-token') } catch (e) {}
+      try {
+        await api.post('/auth/share-token')
+      } catch (e) {}
+    }
+    return response
+  }
+
+  async function register(username, password) {
+    const response = await api.post('/auth/register', { username, password })
+    if (response.success) {
+      token.value = response.token
+      user.value = response.user
+      localStorage.setItem('token', response.token)
+      localStorage.setItem('user', JSON.stringify(response.user))
+      try {
+        await api.post('/auth/share-token')
+      } catch (e) {}
     }
     return response
   }
@@ -64,8 +74,9 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     user,
     isLoggedIn,
-    autoLogin,
+    isAdmin,
     login,
+    register,
     logout,
     fetchUser
   }

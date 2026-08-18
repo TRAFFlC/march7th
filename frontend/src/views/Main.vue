@@ -11,6 +11,7 @@
         <img :src="userAvatar" alt="avatar" class="user-avatar-img" />
         <div class="user-details">
           <span class="username">{{ userNickname }}</span>
+          <span class="role">{{ authStore.user?.role === 'admin' ? '管理员' : '用户' }}</span>
         </div>
       </div>
 
@@ -20,6 +21,8 @@
           :key="item.path"
           :to="item.path"
           class="nav-item"
+          :class="{ admin: item.admin }"
+          v-show="!item.admin || authStore.isAdmin"
         >
           <img :src="item.emoji" :alt="item.label" class="nav-emoji" />
           <span class="nav-label">{{ item.label }}</span>
@@ -59,10 +62,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import api from '../utils/api'
 
+const router = useRouter()
 const authStore = useAuthStore()
 
 const userProfile = ref({
@@ -85,8 +90,7 @@ const navItems = [
   { path: '/rag', emoji: '/emojis/三月七_暗中观察.png', label: 'RAG管理' },
   { path: '/characters', emoji: '/emojis/三月七_买买买.png', label: '角色管理' },
   { path: '/personal', emoji: '/emojis/三月七_点赞.png', label: '个人数据' },
-  { path: '/settings', emoji: '/emojis/三月七_骄傲.png', label: '系统设置' },
-  { path: '/debug', emoji: '/emojis/三月七_吃糖.png', label: '调试面板' },
+  { path: '/admin', emoji: '/emojis/三月七_骄傲.png', label: '后台管理', admin: true },
 ]
 
 const status = ref({
@@ -95,9 +99,9 @@ const status = ref({
   gpuMemoryMb: 0
 })
 
-async function handleLogout() {
-  await authStore.logout()
-  await authStore.autoLogin()
+function handleLogout() {
+  authStore.logout()
+  router.push('/login')
 }
 
 async function fetchStatus() {
@@ -125,13 +129,19 @@ async function fetchUserProfile() {
   }
 }
 
-onMounted(async () => {
-  if (!authStore.isLoggedIn) {
-    await authStore.autoLogin()
-  }
+let statusTimer = null
+
+onMounted(() => {
   fetchStatus()
   fetchUserProfile()
-  setInterval(fetchStatus, 10000)
+  statusTimer = setInterval(fetchStatus, 10000)
+})
+
+onUnmounted(() => {
+  if (statusTimer) {
+    clearInterval(statusTimer)
+    statusTimer = null
+  }
 })
 </script>
 
@@ -216,6 +226,11 @@ onMounted(async () => {
   font-size: 16px;
 }
 
+.role {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .nav-menu {
   display: flex;
   flex-direction: column;
@@ -257,6 +272,14 @@ onMounted(async () => {
   background: linear-gradient(135deg, rgba(233, 69, 96, 0.3) 0%, rgba(255, 107, 157, 0.2) 100%);
   border-color: var(--accent-primary);
   color: var(--accent-secondary);
+}
+
+.nav-item.admin {
+  background: rgba(255, 193, 7, 0.1);
+}
+
+.nav-item.admin:hover {
+  background: rgba(255, 193, 7, 0.2);
 }
 
 .nav-emoji {

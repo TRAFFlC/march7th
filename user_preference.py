@@ -182,7 +182,7 @@ class UserPreferenceAnalyzer:
         if not self.user_id:
             return ''
         
-        cache_key = f"{self.user_id}_{decay_rate}"
+        cache_key = f"{self.user_id}_{max_keywords}_{decay_rate}"
         if cache_key in self._cache:
             return self._cache[cache_key].get('context', '')
         
@@ -194,7 +194,7 @@ class UserPreferenceAnalyzer:
         self._cache.clear()
     
     def refresh(self, decay_rate: float = PREFERENCE_DECAY_RATE):
-        cache_key = f"{self.user_id}_{decay_rate}" if self.user_id else None
+        cache_key = f"{self.user_id}_5_{decay_rate}" if self.user_id else None
         if cache_key and cache_key in self._cache:
             del self._cache[cache_key]
         return self.get_context(decay_rate=decay_rate)

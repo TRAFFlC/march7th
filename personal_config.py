@@ -16,6 +16,27 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def _parse_csv_env(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _validate_jwt_secret(secret: str) -> str:
+    weak_values = {
+        "",
+        "your-secret-key-here",
+        "your_jwt_secret_here",
+        "march7th_secret_key_2024",
+        "march7th_jwt_secret_key_2024_very_secure",
+        "secret",
+        "changeme",
+    }
+    if secret in weak_values or len(secret) < 32:
+        raise RuntimeError(
+            "JWT_SECRET 未配置或过弱。请在 .env 中设置至少 32 位的强随机字符串。"
+        )
+    return secret
+
+
 MYSQL_CONFIG = {
     "host": _env("MYSQL_HOST", "localhost"),
     "port": int(_env("MYSQL_PORT", "3306")),
@@ -53,8 +74,10 @@ LOG_CONFIG = {
     "log_level": "INFO",
 }
 
+JWT_SECRET = _validate_jwt_secret(_env("JWT_SECRET", ""))
+
 JWT_CONFIG = {
-    "secret": _env("JWT_SECRET", ""),
+    "secret": JWT_SECRET,
     "expire_hours": int(_env("JWT_EXPIRE_HOURS", "24")),
 }
 
@@ -76,7 +99,16 @@ LLM_MODEL = _env("LLM_MODEL", "deepseek-r1:8b")
 LLM_MAX_TOKENS = int(_env("LLM_MAX_TOKENS", "1024"))
 
 OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY", "")
+CHATANYWHERE_API_KEY = _env("CHATANYWHERE_API_KEY", "")
 
 _is_production = _env("MARCH7TH_ENV", "development") == "production"
-_default_dev_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
-CORS_ALLOWED_ORIGINS = _env("CORS_ALLOWED_ORIGINS", _default_dev_origins).split(",")
+_default_cors_origins = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:8000,http://127.0.0.1:8000"
+    if not _is_production
+    else "http://localhost:7860"
+)
+CORS_ALLOWED_ORIGINS = [
+    origin for origin in _parse_csv_env(_env("CORS_ALLOWED_ORIGINS", _default_cors_origins))
+    if origin != "*"
+]

@@ -11,30 +11,101 @@
         <button class="btn btn-primary btn-new-session" @click="createNewSession" :disabled="!selectedCharacter">
           ➕ 新建会话
         </button>
+        <div class="session-view-toggle">
+          <button :class="['toggle-btn', { active: sessionViewMode === 'all' }]" @click="sessionViewMode = 'all'">列表</button>
+          <button :class="['toggle-btn', { active: sessionViewMode === 'grouped' }]" @click="sessionViewMode = 'grouped'">分组</button>
+        </div>
         <div class="session-list">
           <div v-if="sessionsLoading" class="session-loading">加载中...</div>
           <div v-else-if="sessions.length === 0" class="session-empty">暂无会话</div>
-          <div
-            v-for="session in sessions"
-            :key="session.id"
-            :class="['session-item', { active: currentSessionId === session.id }]"
-            @click="switchSession(session)"
-            @contextmenu.prevent="showSessionMenu($event, session)"
-          >
-            <div class="session-char-name">{{ getCharacterName(session.character_id) }}</div>
-            <div v-if="editingSessionId === session.id" class="session-title-edit">
-              <input v-model="editingTitle" @keyup.enter="saveSessionTitle(session)" @blur="saveSessionTitle(session)" 
-                class="title-input" placeholder="输入对话名称" />
+          <template v-else-if="sessionViewMode === 'all'">
+            <div
+              v-for="session in recentSessions"
+              :key="session.id"
+              :class="['session-item', { active: currentSessionId === session.id }]"
+              @click="switchSession(session)"
+              @contextmenu.prevent="showSessionMenu($event, session)"
+            >
+              <div class="session-char-name">{{ getCharacterName(session.character_id) }}</div>
+              <div v-if="editingSessionId === session.id" class="session-title-edit">
+                <input v-model="editingTitle" @keyup.enter="saveSessionTitle(session)" @blur="saveSessionTitle(session)" 
+                  class="title-input" placeholder="输入对话名称" />
+              </div>
+              <div v-else class="session-summary" @dblclick="startEditTitle(session)">
+                {{ getSessionSummary(session) }}
+                <span class="edit-title-btn" @click.stop="startEditTitle(session)">✏️</span>
+              </div>
+              <div class="session-meta">
+                <span class="session-count"><img src="/emojis/三月七_悄悄话.png" class="emoji-icon" /> {{ session.message_count || 0 }}</span>
+                <span class="session-time">{{ formatSessionTime(session.last_message_at) }}</span>
+              </div>
             </div>
-            <div v-else class="session-summary" @dblclick="startEditTitle(session)">
-              {{ getSessionSummary(session) }}
-              <span class="edit-title-btn" @click.stop="startEditTitle(session)">✏️</span>
+            <div v-if="olderSessions.length > 0" class="older-sessions-section">
+              <button class="older-sessions-toggle" @click="olderSessionsExpanded = !olderSessionsExpanded">
+                <span class="toggle-chevron">{{ olderSessionsExpanded ? '📂' : '📁' }}</span>
+                更早的会话 ({{ olderSessions.length }})
+                <span :class="['chevron-icon', { expanded: olderSessionsExpanded }]">▼</span>
+              </button>
+              <transition name="slide-expand">
+                <div v-if="olderSessionsExpanded" class="older-sessions-body">
+                  <div
+                    v-for="session in olderSessions"
+                    :key="session.id"
+                    :class="['session-item', 'compact-session-item', { active: currentSessionId === session.id }]"
+                    @click="switchSession(session)"
+                    @contextmenu.prevent="showSessionMenu($event, session)"
+                  >
+                    <div class="session-char-name">{{ getCharacterName(session.character_id) }}</div>
+                    <div v-if="editingSessionId === session.id" class="session-title-edit">
+                      <input v-model="editingTitle" @keyup.enter="saveSessionTitle(session)" @blur="saveSessionTitle(session)" 
+                        class="title-input" placeholder="输入对话名称" />
+                    </div>
+                    <div v-else class="session-summary" @dblclick="startEditTitle(session)">
+                      {{ getSessionSummary(session) }}
+                      <span class="edit-title-btn" @click.stop="startEditTitle(session)">✏️</span>
+                    </div>
+                    <div class="session-meta">
+                      <span class="session-count"><img src="/emojis/三月七_悄悄话.png" class="emoji-icon" /> {{ session.message_count || 0 }}</span>
+                      <span class="session-time">{{ formatSessionTime(session.last_message_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
             </div>
-            <div class="session-meta">
-              <span class="session-count"><img src="/emojis/三月七_悄悄话.png" class="emoji-icon" /> {{ session.message_count || 0 }}</span>
-              <span class="session-time">{{ formatSessionTime(session.last_message_at) }}</span>
+          </template>
+          <template v-else-if="sessionViewMode === 'grouped'">
+            <div v-for="group in groupedSessions" :key="group.characterId" class="session-group">
+              <div class="session-group-header" @click="collapsedGroups[group.characterId] = !collapsedGroups[group.characterId]">
+                <span class="group-char-name">{{ group.characterName }}</span>
+                <span class="session-count-badge">{{ group.sessions.length }}</span>
+                <span :class="['chevron-icon', { expanded: !collapsedGroups[group.characterId] }]">▼</span>
+              </div>
+              <transition name="slide-expand">
+                <div v-if="!collapsedGroups[group.characterId]" class="session-group-body">
+                  <div
+                    v-for="session in group.sessions"
+                    :key="session.id"
+                    :class="['session-item', { active: currentSessionId === session.id }]"
+                    @click="switchSession(session)"
+                    @contextmenu.prevent="showSessionMenu($event, session)"
+                  >
+                    <div v-if="editingSessionId === session.id" class="session-title-edit">
+                      <input v-model="editingTitle" @keyup.enter="saveSessionTitle(session)" @blur="saveSessionTitle(session)" 
+                        class="title-input" placeholder="输入对话名称" />
+                    </div>
+                    <div v-else class="session-summary" @dblclick="startEditTitle(session)">
+                      {{ getSessionSummary(session) }}
+                      <span class="edit-title-btn" @click.stop="startEditTitle(session)">✏️</span>
+                    </div>
+                    <div class="session-meta">
+                      <span class="session-count"><img src="/emojis/三月七_悄悄话.png" class="emoji-icon" /> {{ session.message_count || 0 }}</span>
+                      <span class="session-time">{{ formatSessionTime(session.last_message_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </div>
@@ -169,6 +240,28 @@
           <div class="message-content" :class="{ 'streaming': msg.isStreaming }">
             <span class="text-content">{{ msg.content }}</span>
             <span v-if="msg.isStreaming" class="cursor">|</span>
+            <div v-if="msg.ragInfo && msg.role === 'bot'" class="rag-debug-inline">
+              <div class="rag-debug-toggle" @click="msg.showRagDebug = !msg.showRagDebug">
+                <span class="rag-debug-icon">🔍</span>
+                <span>RAG: {{ msg.ragInfo.status === 'ok' ? `检索到${msg.ragInfo.total_found}个文档` : msg.ragInfo.status === 'partial' ? `部分检索(${msg.ragInfo.total_found}个)` : msg.ragInfo.status === 'no_results' ? '无结果' : '未启用' }}</span>
+                <span class="rag-debug-arrow">{{ msg.showRagDebug ? '▼' : '▶' }}</span>
+              </div>
+              <div v-if="msg.showRagDebug" class="rag-debug-detail">
+                <div class="rag-debug-meta">
+                  <span>查询: {{ msg.ragInfo.query }}</span>
+                  <span>状态: {{ msg.ragInfo.status }}</span>
+                  <span>Top-K: {{ msg.ragInfo.top_k }}</span>
+                  <span>阈值: {{ msg.ragInfo.distance_threshold }}</span>
+                </div>
+                <div v-for="(doc, di) in msg.ragInfo.documents" :key="di" class="rag-debug-doc">
+                  <div class="rag-debug-doc-header">
+                    <span>文档{{ doc.index || di + 1 }}</span>
+                    <span>距离: {{ doc.distance }} | 相似度: {{ doc.similarity ?? 'N/A' }}</span>
+                  </div>
+                  <div class="rag-debug-doc-content">{{ doc.content }}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -533,6 +626,7 @@ const recognition = ref(null)
 const voiceInputSupported = ref(false)
 const interimTranscript = ref('')
 let eventSource = null
+let streamAbortController = null
 let reconnectAttempts = 0
 const maxReconnectAttempts = 3
 
@@ -596,6 +690,11 @@ const iterationApiWarningPending = ref(false)
 const editingSessionId = ref(null)
 const editingTitle = ref('')
 const userProfile = ref(null)
+
+const maxVisibleSessions = ref(5)
+const sessionViewMode = ref('all')
+const collapsedGroups = ref({})
+const olderSessionsExpanded = ref(false)
 
 onMounted(async () => {
   try {
@@ -765,9 +864,9 @@ function closeEventSource() {
     eventSource.close()
     eventSource = null
   }
-  if (window._sseAbortController) {
-    window._sseAbortController.abort()
-    window._sseAbortController = null
+  if (streamAbortController) {
+    streamAbortController.abort()
+    streamAbortController = null
   }
 }
 
@@ -883,12 +982,10 @@ function connectSSE(message) {
   closeEventSource()
   
   const token = localStorage.getItem('token') || ''
-  const baseUrl = api.defaults?.baseURL || ''
-  const url = `${baseUrl}/api/chat/stream`
+  const url = '/api/chat/stream'
   
+  streamAbortController = new AbortController()
   let currentMessageIndex = messages.value.length - 1
-  let abortController = new AbortController()
-  window._sseAbortController = abortController
   
   fetch(url, {
     method: 'POST',
@@ -901,19 +998,24 @@ function connectSSE(message) {
       character_id: selectedCharacter.value || '',
       session_id: currentSessionId.value || ''
     }),
-    signal: abortController.signal
-  }).then(response => {
+    signal: streamAbortController.signal
+  })
+  .then(response => {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
     reconnectAttempts = 0
-    
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let currentEventType = ''
     
     function processChunk({ done, value }) {
       if (done) {
+        if (messages.value[currentMessageIndex]) {
+          messages.value[currentMessageIndex].isStreaming = false
+        }
+        loading.value = false
         return
       }
       
@@ -922,54 +1024,50 @@ function connectSSE(message) {
       buffer = lines.pop() || ''
       
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const dataStr = line.slice(6)
-        if (dataStr.trim() === '[DONE]') continue
-        
-        let eventType = 'text'
-        const eventMatch = line.match(/^event:\s*(\w+)/)
-        if (eventMatch) eventType = eventMatch[1]
-        
-        try {
-          const data = JSON.parse(dataStr)
-          
-          if (eventType === 'text' || (data.content !== undefined)) {
-            if (data.content) {
+        if (line.startsWith('event: ')) {
+          currentEventType = line.slice(7).trim()
+          continue
+        }
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6)
+          try {
+            const data = JSON.parse(dataStr)
+            if (currentEventType === 'text' && data.content) {
               if (messages.value[currentMessageIndex]) {
                 messages.value[currentMessageIndex].content += data.content
                 messages.value[currentMessageIndex].isStreaming = true
+                scrollToBottom()
               }
-              scrollToBottom()
-            }
-          } else if (eventType === 'audio' || data.audio) {
-            if (data.audio) {
+            } else if (currentEventType === 'audio' && data.audio) {
               const audioUrl = `data:audio/wav;base64,${data.audio}`
               audioQueue.value.push(audioUrl)
               if (!isPlayingAudio.value) {
                 playNextAudio()
               }
+            } else if (currentEventType === 'done') {
+              if (messages.value[currentMessageIndex]) {
+                messages.value[currentMessageIndex].isStreaming = false
+                if (data.rag_info) {
+                  messages.value[currentMessageIndex].ragInfo = data.rag_info
+                  messages.value[currentMessageIndex].showRagDebug = false
+                }
+              }
+              lastConversationId.value = data.conversation_id
+              if (data.session_id && !currentSessionId.value) {
+                currentSessionId.value = data.session_id
+                loadSessions()
+              }
+              loading.value = false
+            } else if (currentEventType === 'error') {
+              if (messages.value[currentMessageIndex]) {
+                messages.value[currentMessageIndex].content = `错误: ${data.error || '流式传输失败'}`
+                messages.value[currentMessageIndex].isStreaming = false
+              }
+              loading.value = false
             }
-          } else if (eventType === 'done' || data.conversation_id) {
-            if (messages.value[currentMessageIndex]) {
-              messages.value[currentMessageIndex].isStreaming = false
-            }
-            lastConversationId.value = data.conversation_id
-            if (data.session_id && !currentSessionId.value) {
-              currentSessionId.value = data.session_id
-              loadSessions()
-            }
-            loading.value = false
-            closeEventSource()
-          } else if (eventType === 'error' || data.message) {
-            if (messages.value[currentMessageIndex]) {
-              messages.value[currentMessageIndex].content = `错误: ${data.message || '流式传输失败'}`
-              messages.value[currentMessageIndex].isStreaming = false
-            }
-            loading.value = false
-            closeEventSource()
+          } catch (e) {
+            // ignore parse errors for partial data
           }
-        } catch (e) {
-          // ignore parse errors for partial data
         }
       }
       
@@ -977,24 +1075,15 @@ function connectSSE(message) {
     }
     
     return reader.read().then(processChunk)
-  }).catch(error => {
-    if (error.name === 'AbortError') return
-    console.error('SSE fetch error:', error)
-    
-    if (reconnectAttempts < maxReconnectAttempts) {
-      reconnectAttempts++
-      console.log(`尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})...`)
-      setTimeout(() => {
-        connectSSE(message)
-      }, 1000 * reconnectAttempts)
-    } else {
-      if (messages.value[currentMessageIndex]) {
-        messages.value[currentMessageIndex].content = '错误: 连接失败，请重试'
-        messages.value[currentMessageIndex].isStreaming = false
-      }
-      loading.value = false
-      closeEventSource()
+  })
+  .catch(err => {
+    if (err.name === 'AbortError') return
+    console.error('Stream error:', err)
+    if (messages.value[currentMessageIndex]) {
+      messages.value[currentMessageIndex].content = '错误: 连接失败，请重试'
+      messages.value[currentMessageIndex].isStreaming = false
     }
+    loading.value = false
   })
 }
 
@@ -1165,7 +1254,8 @@ async function sendMessage() {
       })
       
       if (response.success) {
-        messages.value.push({ role: 'bot', content: response.response })
+        const botMsg = { role: 'bot', content: response.response, ragInfo: response.rag_info || null, showRagDebug: false }
+        messages.value.push(botMsg)
         lastConversationId.value = response.conversation_id
         if (response.session_id && !currentSessionId.value) {
           currentSessionId.value = response.session_id
@@ -1253,12 +1343,12 @@ async function submitFeedbackWithRating(feedbackType) {
   lastFeedbackType.value = feedbackType
   
   try {
-    const feedbackResponse = await api.post('/chat/feedback', {
+    const response = await api.post('/chat/feedback', {
       conversation_id: lastConversationId.value,
       feedback_type: feedbackType
     })
-
-    if (feedbackResponse.timeout) {
+    
+    if (response.timeout) {
       feedbackMessage.value = '⏱️ RAG迭代分析超时，API响应时间过长，请稍后重试'
       feedbackMessageType.value = 'error'
       closeFeedbackModal()
@@ -1395,13 +1485,13 @@ async function fetchRagIteration(forceRegenerate = false) {
       showIterationApiWarning.value = true
       return
     }
-
+    
     if (response.timeout) {
       ragIterationResult.value = '<div class="rag-timeout-error">⏱️ RAG迭代分析超时，API响应时间过长，请稍后重试</div>'
       ragIterationLoading.value = false
       return
     }
-
+    
     if (response.feedback_id) {
       ragIterationFeedbackId.value = response.feedback_id
     }
@@ -1796,6 +1886,30 @@ const userAvatar = computed(() => {
 
 const currentCharacter = computed(() => {
   return characters.value.find(c => c.id === selectedCharacter.value) || null
+})
+
+const recentSessions = computed(() => {
+  return sessions.value.slice(0, maxVisibleSessions.value)
+})
+
+const olderSessions = computed(() => {
+  return sessions.value.slice(maxVisibleSessions.value)
+})
+
+const groupedSessions = computed(() => {
+  const groups = {}
+  for (const session of sessions.value) {
+    const charId = session.character_id || 'unknown'
+    if (!groups[charId]) {
+      groups[charId] = {
+        characterId: charId,
+        characterName: getCharacterName(charId),
+        sessions: []
+      }
+    }
+    groups[charId].sessions.push(session)
+  }
+  return Object.values(groups).sort((a, b) => b.sessions.length - a.sessions.length)
 })
 
 const isIterationApiOllama = computed(() => {
@@ -2819,6 +2933,77 @@ async function deleteSessionAction() {
   background: rgba(233, 69, 96, 0.2);
 }
 
+.rag-debug-inline {
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 6px;
+}
+
+.rag-debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  user-select: none;
+  padding: 2px 0;
+}
+
+.rag-debug-toggle:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.rag-debug-icon {
+  font-size: 11px;
+}
+
+.rag-debug-arrow {
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.rag-debug-detail {
+  margin-top: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.rag-debug-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+}
+
+.rag-debug-doc {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.rag-debug-doc-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 4px;
+}
+
+.rag-debug-doc-content {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+  max-height: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .rag-iteration-panel {
   padding: 16px;
   background: rgba(0, 0, 0, 0.2);
@@ -3240,6 +3425,150 @@ async function deleteSessionAction() {
   gap: 12px;
   justify-content: center;
   margin-top: 8px;
+}
+
+.session-view-toggle {
+  display: flex;
+  margin: 0 12px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn.active {
+  background: rgba(233, 69, 96, 0.2);
+  color: var(--accent-primary);
+  font-weight: 500;
+}
+
+.toggle-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.older-sessions-section {
+  margin-top: 4px;
+}
+
+.older-sessions-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.older-sessions-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.toggle-chevron {
+  font-size: 14px;
+}
+
+.chevron-icon {
+  margin-left: auto;
+  font-size: 10px;
+  transition: transform 0.3s ease;
+}
+
+.chevron-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.older-sessions-body {
+  padding-top: 4px;
+}
+
+.compact-session-item {
+  padding: 8px 12px;
+  opacity: 0.85;
+}
+
+.compact-session-item:hover {
+  opacity: 1;
+}
+
+.session-group {
+  margin-bottom: 4px;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.session-group-header:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.group-char-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.session-count-badge {
+  background: rgba(233, 69, 96, 0.2);
+  color: var(--accent-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.session-group-body {
+  padding: 4px 0 0 8px;
+}
+
+.slide-expand-enter-active,
+.slide-expand-leave-active {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.slide-expand-enter-from,
+.slide-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  transform: translateY(-8px);
+}
+
+.slide-expand-enter-to,
+.slide-expand-leave-from {
+  opacity: 1;
+  max-height: 2000px;
+  transform: translateY(0);
 }
 </style>
 

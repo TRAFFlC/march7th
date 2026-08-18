@@ -293,14 +293,6 @@ class March7thChatbot:
     def count_tokens(self, text: str) -> int:
         return len(self.encoder.encode(text))
 
-    def _estimate_fixed_tokens(self, query: str, context: List[str] = None) -> int:
-        tokens = self.count_tokens(
-            self.system_prompt) + self.count_tokens(query)
-        if context:
-            tokens += self.count_tokens("\n\n".join(context))
-        tokens += self.rag_context_tokens
-        return tokens
-
     def get_context_usage(self) -> dict:
         history_tokens = sum(self.count_tokens(
             msg["content"]) for msg in self.conversation_history)
@@ -599,8 +591,8 @@ class March7thChatbot:
             messages, system_content, query
         )
 
-        safe_max_output = min(max_new_tokens, available_for_output -
-                              OUTPUT_RESERVED, MAX_CONTEXT_TOKENS - input_tokens)
+        safe_max_output = max(MIN_OUTPUT_TOKENS, min(max_new_tokens, available_for_output -
+                              OUTPUT_RESERVED, MAX_CONTEXT_TOKENS - input_tokens))
 
         if self.debug:
             usage = self.get_context_usage()
@@ -806,8 +798,8 @@ class March7thChatbot:
             messages, system_content, query
         )
 
-        safe_max_output = min(1024, available_for_output -
-                              OUTPUT_RESERVED, MAX_CONTEXT_TOKENS - input_tokens)
+        safe_max_output = max(MIN_OUTPUT_TOKENS, min(1024, available_for_output -
+                              OUTPUT_RESERVED, MAX_CONTEXT_TOKENS - input_tokens))
 
         rag_documents = []
         for i, (doc, dist) in enumerate(zip(context, distances)):

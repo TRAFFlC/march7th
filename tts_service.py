@@ -16,9 +16,6 @@ import config
 from emotion_config import get_emotion_audio_path
 
 
-_tts_start_lock = threading.Lock()
-
-
 def log(msg: str):
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] [TTS] {msg}", flush=True)
@@ -76,29 +73,6 @@ def clean_text_for_tts(text: str) -> str:
     cleaned = re.sub(r'^[，、。？！]+', '', cleaned)
 
     return cleaned.strip()
-
-
-def split_text_by_punctuation(text: str, min_segments: int = 2) -> list:
-    punctuation_pattern = r'([，、。？！])'
-    parts = re.split(punctuation_pattern, text)
-    segments = []
-    current = ""
-    punct_count = 0
-    for part in parts:
-        if not part:
-            continue
-        if re.match(punctuation_pattern, part):
-            current += part
-            punct_count += 1
-            if punct_count >= min_segments:
-                segments.append(current.strip())
-                current = ""
-                punct_count = 0
-        else:
-            current += part
-    if current.strip():
-        segments.append(current.strip())
-    return [s for s in segments if s]
 
 
 class TTSService:
@@ -466,42 +440,6 @@ def get_tts_instance(
         if ref_text:
             _tts_instance.ref_text = ref_text
     return _tts_instance
-
-
-def synthesize_speech(
-    text: str,
-    ref_audio_path: str = None,
-    ref_text: str = None,
-    text_language: str = "zh",
-    top_k: int = 15,
-    top_p: float = 0.6,
-    temperature: float = 0.6,
-    speed: float = 1.0,
-    auto_start: bool = True,
-    emotion: str = "neutral",
-    character_id: str = None,
-) -> bytes:
-    global _tts_start_lock
-    tts = get_tts_instance(ref_audio_path, ref_text)
-
-    if auto_start and not tts._is_running():
-        with _tts_start_lock:
-            if not tts._is_running():
-                log("TTS服务未运行，正在启动...")
-                started = tts.start()
-                if not started:
-                    raise RuntimeError("TTS服务启动失败")
-
-    return tts.synthesize(
-        text=text,
-        text_language=text_language,
-        top_k=top_k,
-        top_p=top_p,
-        temperature=temperature,
-        speed=speed,
-        emotion=emotion,
-        character_id=character_id,
-    )
 
 
 def get_current_ref_config() -> dict:

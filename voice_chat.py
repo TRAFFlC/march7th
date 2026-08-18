@@ -139,7 +139,13 @@ class VoiceChatController:
         self.llm.use_rag = character.rag_config.enabled
         self.llm.top_k = character.rag_config.top_k
         self.llm.distance_threshold = character.rag_config.distance_threshold
-        self.llm.collection_name = character.rag_config.collection_name or ""
+        new_collection = character.rag_config.collection_name or ""
+        if new_collection != self.llm.collection_name:
+            self.llm.collection_name = new_collection
+            self.llm.collection = None
+            self.llm.load_rag()
+        else:
+            self.llm.collection_name = new_collection
         self.llm.character_config = character
 
         self.tts.update_ref_audio(
@@ -377,13 +383,21 @@ class VoiceChatController:
 
         log("LLM生成回复中...")
         t1 = time.time()
-        result = self.llm.generate(
-            user_input,
-            temperature=temperature,
-            top_p=top_p,
-            model_name=model_name,
-        )
+        try:
+            result = self.llm.generate(
+                user_input,
+                temperature=temperature,
+                top_p=top_p,
+                model_name=model_name,
+            )
+        except Exception:
+            self._release_llm()
+            raise
         response_text = result["response"]
+        if response_text.startswith("[ERROR]"):
+            self._release_llm()
+            log(f"LLM生成失败: {response_text}")
+            raise RuntimeError(response_text)
         llm_debug = result["debug_info"]
         llm_time = time.time() - t1
         log(f"LLM生成完成，耗时: {llm_time:.2f}s")
@@ -397,6 +411,17 @@ class VoiceChatController:
             "full_prompt": llm_debug["full_prompt"],
         }
         debug_info["rag"] = llm_debug["rag"]
+
+        rag = llm_debug["rag"]
+        if rag.get("enabled"):
+            status = rag.get("status", "unknown")
+            docs = rag.get("documents", [])
+            log(f"RAG检索: 状态={status}, 检索到{len(docs)}个文档")
+            for doc in docs:
+                content_preview = doc.get("content", "")[:80].replace("\n", " ")
+                log(f"  文档{doc.get('index', '?')}: distance={doc.get('distance', 'N/A')}, similarity={doc.get('similarity', 'N/A')}, 内容={content_preview}...")
+        else:
+            log("RAG检索: 未启用")
 
         detected_emotion = emotion
         emotion_match = EMOTION_PATTERN.search(response_text)
@@ -449,25 +474,6 @@ class VoiceChatController:
         log(f"========== 处理完成，总耗时: {total_time:.2f}s ==========")
         return clean_response, audio_bytes, conversation_id, debug_info
 
-    def chat_text_only(
-        self,
-        user_input: str,
-        temperature: float = 1.0,
-        top_p: float = 0.9,
-    ) -> str:
-        self._ensure_llm_active()
-
-        result = self.llm.generate(
-            user_input,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        response_text = result["response"]
-
-        self._save_to_history(user_input, response_text)
-
-        return response_text
-
     def llm_chat(
         self,
         user_input: str,
@@ -512,6 +518,10 @@ class VoiceChatController:
             "input_tokens": llm_debug["tokens"]["input_tokens"],
             "output_tokens": llm_debug["tokens"]["output_tokens"],
             "rag_documents": llm_debug["rag"]["documents"],
+            "rag_status": llm_debug["rag"].get("status", "unknown"),
+            "rag_enabled": llm_debug["rag"].get("enabled", False),
+            "rag_top_k": llm_debug["rag"].get("top_k", 0),
+            "rag_distance_threshold": llm_debug["rag"].get("distance_threshold", 0),
             "full_prompt": llm_debug["full_prompt"],
             "raw_output": llm_debug["raw_output"],
         }
@@ -652,7 +662,21 @@ class VoiceChatController:
                 session_id=session_id, emotion=detected_emotion
             )
 
-            yield {"type": "done", "conversation_id": conversation_id}
+            rag_debug = self.llm._last_debug_info.get("rag", {}) if hasattr(self.llm, '_last_debug_info') and self.llm._last_debug_info else {}
+
+            yield {
+                "type": "done",
+                "conversation_id": conversation_id,
+                "rag_info": {
+                    "enabled": rag_debug.get("enabled", False),
+                    "status": rag_debug.get("status", "unknown"),
+                    "query": user_input,
+                    "top_k": rag_debug.get("top_k", 0),
+                    "distance_threshold": rag_debug.get("distance_threshold", 0),
+                    "total_found": len(rag_debug.get("documents", [])),
+                    "documents": rag_debug.get("documents", []),
+                },
+            }
 
             log(f"========== 流式处理完成 ==========")
 
@@ -763,44 +787,3 @@ def get_controller(character_id: str = None) -> VoiceChatController:
     elif character_id and character_id != _controller_instance.current_character_id:
         _controller_instance.switch_character(character_id)
     return _controller_instance
-
-
-def handle_chat(user_input: str, character_id: str = None, user_id: int = None) -> Tuple[str, Optional[bytes], str, Optional[int], dict]:
-    if not user_input or not user_input.strip():
-        return "", None, "请输入内容", None, {}
-
-    controller = get_controller(character_id=character_id)
-
-    try:
-        response_text, audio_bytes, conversation_id, debug_info = controller.process_user_input(
-            user_input.strip(),
-            character_id=character_id,
-            user_id=user_id,
-        )
-        status = f"完成 | GPU显存: {check_gpu_memory():.0f}MB"
-        return response_text, audio_bytes, status, conversation_id, debug_info
-    except Exception as e:
-        return "", None, f"错误: {str(e)}", None, {}
-
-
-def clear_history() -> str:
-    controller = get_controller()
-    controller.clear_history()
-    return "对话历史已清除"
-
-
-def save_feedback(rating: int = None) -> str:
-    controller = get_controller()
-    success = controller.save_feedback(rating=rating)
-    if success:
-        return "反馈已保存"
-    return "保存反馈失败"
-
-
-def get_system_status() -> str:
-    controller = get_controller()
-    status = controller.get_status()
-    char_info = ""
-    if status.get("current_character_name"):
-        char_info = f" | 角色: {status['current_character_name']}"
-    return f"LLM: {'运行中' if status['llm_active'] else '已停止'} | TTS: {'运行中' if status['tts_active'] else '已停止'} | GPU: {status['gpu_memory_mb']:.0f}MB{char_info}"

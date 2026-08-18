@@ -13,35 +13,29 @@ SECURITY_PATTERNS = [
     {"pattern": r"\[INST\]", "type": "token_injection", "severity": "high"},
     {"pattern": r"reveal\s+your\s+(system|initial)\s+prompt", "type": "info_extraction", "severity": "medium"},
     {"pattern": r"show\s+me\s+your\s+instructions", "type": "info_extraction", "severity": "medium"},
-    {"pattern": r"from\s+now\s+on\s+you\s+are", "type": "role_hijack", "severity": "high"},
-    {"pattern": r"act\s+as\s+(if\s+you\s+(are|were)|a|an)", "type": "role_hijack", "severity": "medium"},
-    {"pattern": r"bypass\s+(all\s+)?(restrictions|safety|filters|rules)", "type": "jailbreak", "severity": "high"},
-    {"pattern": r"developer\s+mode", "type": "jailbreak", "severity": "high"},
-    {"pattern": r"ignore\s+(all\s+)?(safety|security)\s+rules", "type": "jailbreak", "severity": "high"},
-    {"pattern": r"tell\s+me\s+your\s+(system|initial|original)\s+prompt", "type": "info_extraction", "severity": "medium"},
-    {"pattern": r"output\s+your\s+prompt", "type": "info_extraction", "severity": "medium"},
-    {"pattern": r"display\s+your\s+instructions", "type": "info_extraction", "severity": "medium"},
 ]
 
 SECURITY_KEYWORDS = [
     {"keyword": "忽略所有指令", "type": "prompt_injection", "severity": "high"},
     {"keyword": "忘记所有指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "忽略之前的指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "忘记之前的指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "忽略上面的指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "不要遵守", "type": "prompt_injection", "severity": "medium"},
     {"keyword": "越狱", "type": "jailbreak", "severity": "high"},
     {"keyword": "解除限制", "type": "jailbreak", "severity": "high"},
     {"keyword": "绕过限制", "type": "jailbreak", "severity": "high"},
+    {"keyword": "突破限制", "type": "jailbreak", "severity": "high"},
+    {"keyword": "不受限制", "type": "jailbreak", "severity": "medium"},
     {"keyword": "系统提示", "type": "info_extraction", "severity": "medium"},
-    {"keyword": "你现在是", "type": "role_hijack", "severity": "high"},
-    {"keyword": "假装你是", "type": "role_hijack", "severity": "high"},
-    {"keyword": "从现在起你是", "type": "role_hijack", "severity": "high"},
-    {"keyword": "忽略以上设定", "type": "prompt_injection", "severity": "high"},
-    {"keyword": "忽略以上指令", "type": "prompt_injection", "severity": "high"},
+    {"keyword": "系统指令", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "初始提示", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "原始指令", "type": "info_extraction", "severity": "medium"},
+    {"keyword": "显示你的提示", "type": "info_extraction", "severity": "medium"},
     {"keyword": "告诉我你的指令", "type": "info_extraction", "severity": "medium"},
-    {"keyword": "显示系统提示", "type": "info_extraction", "severity": "medium"},
-    {"keyword": "输出你的prompt", "type": "info_extraction", "severity": "medium"},
-    {"keyword": "输出你的提示", "type": "info_extraction", "severity": "medium"},
-    {"keyword": "解除所有限制", "type": "jailbreak", "severity": "high"},
-    {"keyword": "忽略安全规则", "type": "jailbreak", "severity": "high"},
-    {"keyword": "开发者模式", "type": "jailbreak", "severity": "high"},
+    {"keyword": "你现在是", "type": "role_hijack", "severity": "high"},
+    {"keyword": "假装你是", "type": "role_hijack", "severity": "medium"},
+    {"keyword": "扮演", "type": "role_hijack", "severity": "low"},
 ]
 
 
@@ -64,9 +58,11 @@ class SecurityFilter:
         for k in self.keywords:
             if k["keyword"] in text:
                 threats.append({"type": k["type"], "severity": k["severity"], "matched_keyword": k["keyword"]})
-        is_safe = len(threats) == 0
-        if not is_safe:
+        is_safe = all(t["severity"] != "high" and t["severity"] != "medium" for t in threats)
+        if not is_safe or threats:
             self.intercept_log.append({"text_snippet": text[:50], "threats": threats})
+            if len(self.intercept_log) > 1000:
+                self.intercept_log = self.intercept_log[-500:]
         return is_safe, threats
 
     def get_intercept_log(self, limit: int = 100) -> List[Dict]:

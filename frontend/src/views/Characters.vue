@@ -18,6 +18,12 @@
       >
         <img src="/emojis/三月七_买买买.png" class="emoji-icon" /> 官方模板
       </button>
+      <button
+        :class="['tab-btn', { active: activeTab === 'community' }]"
+        @click="activeTab = 'community'; loadCommunityCharacters()"
+      >
+        <img src="/emojis/三月七_骄傲.png" class="emoji-icon" /> 社区市场
+      </button>
     </div>
 
     <div class="characters-container" v-if="activeTab === 'list'">
@@ -233,14 +239,14 @@
             </div>
             <div v-if="expandedSections.iterationApi" class="section-content">
               <p class="section-hint">配置多个API端点，系统将按顺序尝试，首个成功即停止。支持串行回退，避免单点故障。</p>
-
+              
               <div class="form-group">
                 <label>
                   <input type="checkbox" v-model="editingCharacter.use_main_api_for_iteration" @change="onIterationApiToggle" />
                   使用主API配置
                 </label>
               </div>
-
+              
               <template v-if="!editingCharacter.use_main_api_for_iteration">
                 <div v-for="(api, index) in editingCharacter.iteration_apis" :key="index" class="iteration-api-item">
                   <div class="iteration-api-header">
@@ -279,7 +285,7 @@
                     </div>
                   </div>
                 </div>
-
+                
                 <button class="btn btn-secondary" @click="addIterationApi" style="margin-top: 8px;">
                   ➕ 新增迭代 API
                 </button>
@@ -341,6 +347,81 @@
           </div>
 
           <div class="form-section">
+            <h4>🔊 TTS 语音合成配置</h4>
+            <p class="section-hint">配置语音合成模型权重和参考音频</p>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>GPT 模型权重路径</label>
+                <div class="input-with-btn">
+                  <input v-model="editingCharacter.tts_gpt_weight" type="text" class="input-field" placeholder="GPT模型权重文件路径 (.ckpt)" />
+                  <button class="btn btn-small btn-secondary" @click="openWeightPicker('gpt')">浏览</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>SoVITS 模型权重路径</label>
+                <div class="input-with-btn">
+                  <input v-model="editingCharacter.tts_sovits_weight" type="text" class="input-field" placeholder="SoVITS模型权重文件路径 (.pth)" />
+                  <button class="btn btn-small btn-secondary" @click="openWeightPicker('sovits')">浏览</button>
+                </div>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>TTS API 端口</label>
+                <input v-model.number="editingCharacter.tts_port" type="number" class="input-field" placeholder="9880" />
+              </div>
+              <div class="form-group">
+                <label>TTS 模型版本</label>
+                <select v-model="editingCharacter.tts_version" class="input-field">
+                  <option value="v1">v1</option>
+                  <option value="v2">v2</option>
+                  <option value="v2ProPlus">v2ProPlus</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>默认参考音频路径</label>
+              <input v-model="editingCharacter.tts_ref_audio_path" type="text" class="input-field" placeholder="默认参考音频路径" />
+            </div>
+            <div class="form-group">
+              <label>默认参考音频文本</label>
+              <textarea v-model="editingCharacter.tts_ref_audio_text" class="input-field" rows="2" placeholder="默认参考音频对应的文本"></textarea>
+            </div>
+          </div>
+
+          <div class="form-section collapsible">
+            <div class="section-header" @click="toggleSection('emotionAudio')">
+              <h4>🎭 情绪参考音频配置</h4>
+              <span class="toggle-icon">{{ expandedSections.emotionAudio ? '▼' : '▶' }}</span>
+            </div>
+            <div v-if="expandedSections.emotionAudio" class="section-content">
+              <div class="emotion-config-header">
+                <p class="section-hint">为每个情绪配置参考音频和文本，用于TTS情绪切换</p>
+                <button class="btn btn-small btn-secondary" @click="scanEmotionFolders">📂 自动扫描</button>
+              </div>
+              
+              <div v-for="emotion in emotionList" :key="emotion.value" class="emotion-item">
+                <div class="emotion-header">
+                  <span class="emotion-name">{{ emotion.icon }} {{ emotion.label }}</span>
+                </div>
+                <div class="emotion-fields">
+                  <div class="form-group compact">
+                    <label>参考音频</label>
+                    <input v-model="editingCharacter.emotions[emotion.value].ref_audio_path" class="input-field" :placeholder="emotion.label + '情绪参考音频路径'" />
+                  </div>
+                  <div class="form-group compact">
+                    <label>参考文本</label>
+                    <textarea v-model="editingCharacter.emotions[emotion.value].ref_text" class="input-field" rows="2" :placeholder="emotion.label + '情绪参考音频对应的文本'"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
             <h4>🕐 动态问候语</h4>
             <p class="section-hint">根据时间段自动注入角色开场白</p>
             <div class="form-group">
@@ -384,6 +465,9 @@
           <div class="form-actions">
             <button class="btn btn-primary" @click="saveCharacter">
               💾 保存
+            </button>
+            <button v-if="!isNewCharacter && editingCharacter?.source === 'admin'" class="btn btn-secondary" @click="publishToCommunity">
+              📤 发布到市场
             </button>
             <button v-if="!isNewCharacter" class="btn btn-danger" @click="deleteCharacter">
               🗑️ 删除
@@ -438,6 +522,121 @@
       </div>
     </div>
 
+    <div class="community-container" v-if="activeTab === 'community'">
+      <div class="community-header">
+        <div class="community-header-row">
+          <div>
+            <h3><img src="/emojis/三月七_骄傲.png" class="emoji-icon" /> 社区市场</h3>
+            <p>发现其他用户分享的角色</p>
+          </div>
+          <button class="btn btn-primary" @click="showUploadModal = true">
+            📤 上传角色
+          </button>
+        </div>
+      </div>
+
+      <div class="community-grid" v-if="communityCharacters.length > 0">
+        <div
+          v-for="char in communityCharacters"
+          :key="char.id"
+          class="community-card"
+        >
+          <div class="community-avatar">
+            <img :src="`/api/community/avatar/${char.id}`" class="avatar-img" />
+          </div>
+          <div class="community-info">
+            <h4>{{ char.name }}</h4>
+            <span class="community-author">by {{ char.username }}</span>
+            <span class="community-model">{{ char.llm_model }}</span>
+            <p v-if="char.description" class="community-desc">{{ char.description }}</p>
+            <div class="community-stats">
+              <span>📥 {{ char.download_count }} 次下载</span>
+            </div>
+          </div>
+          <div class="community-actions">
+            <button
+              class="btn btn-primary"
+              @click="importFromCommunity(char)"
+              :disabled="importingCommunityId === char.id"
+            >
+              {{ importingCommunityId === char.id ? '导入中...' : '➕ 导入' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="empty-community" v-else>
+        <span class="empty-icon"><img src="/emojis/三月七_无语.png" class="emoji-icon-lg" /></span>
+        <p>暂无社区角色，成为第一个分享角色的人吧！</p>
+      </div>
+    </div>
+
+    <div v-if="showUploadModal" class="modal-overlay" @click.self="showUploadModal = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>上传角色到社区市场</h3>
+          <button class="modal-close" @click="showUploadModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="publishableCharacters.length === 0" class="no-publishable">
+            <p>暂无可发布的角色</p>
+          </div>
+          <div v-else class="publishable-list">
+            <div v-for="char in publishableCharacters" :key="char.id" class="publishable-item">
+              <div class="publishable-info">
+                <span class="publishable-name">{{ char.name }}</span>
+                <span class="publishable-model">{{ char.llm_model }}</span>
+              </div>
+              <button
+                class="btn btn-primary btn-sm"
+                @click="publishCharacterFromModal(char)"
+                :disabled="publishingCharId === char.id"
+              >
+                {{ publishingCharId === char.id ? '发布中...' : '📤 发布' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="publishableCharacters.length > 0" class="form-group" style="margin-top: 16px;">
+            <label>角色描述 <span class="hint">(可选)</span></label>
+            <textarea
+              v-model="uploadDescription"
+              class="input-field"
+              placeholder="介绍一下这个角色的特点..."
+              rows="3"
+            ></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showWeightPicker" class="weight-picker-modal" @click.self="showWeightPicker = false">
+      <div class="weight-picker-content">
+        <h3>选择 {{ weightPickerTarget === 'gpt' ? 'GPT' : 'SoVITS' }} 权重文件</h3>
+        <p class="section-hint">点击文件选择，仅显示 {{ weightPickerTarget === 'gpt' ? '.ckpt' : '.pth' }} 文件</p>
+        
+        <div v-if="weightFilesLoading" class="weight-loading">加载中...</div>
+        <div v-else-if="weightFiles.length === 0" class="weight-empty">未找到权重文件</div>
+        <div v-else class="weight-file-list">
+          <div
+            v-for="file in weightFiles.filter(f => f.type === weightPickerTarget)"
+            :key="file.path"
+            class="weight-file-item"
+            @click="selectWeightFile(file)"
+          >
+            <div class="weight-file-info">
+              <span class="weight-file-name">{{ file.filename }}</span>
+              <span class="weight-file-size">{{ formatBytes(file.size) }}</span>
+            </div>
+            <span class="weight-file-type">{{ file.type.toUpperCase() }}</span>
+          </div>
+        </div>
+        
+        <div style="margin-top: 16px; text-align: right;">
+          <button class="btn btn-secondary" @click="showWeightPicker = false">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="message.text" :class="['message', message.type]">
       {{ message.text }}
     </div>
@@ -461,10 +660,12 @@ import api from '../utils/api'
 
 const characters = ref([])
 const templates = ref([])
+const communityCharacters = ref([])
 const editingCharacter = ref(null)
 const isNewCharacter = ref(false)
 const activeTab = ref('list')
 const isImporting = ref(null)
+const importingCommunityId = ref(null)
 const message = ref({ text: '', type: 'info' })
 const showConfirmDialog = ref(false)
 const pendingTemplate = ref(null)
@@ -472,7 +673,29 @@ const testingApi = ref(false)
 const apiTestResult = ref(null)
 const expandedSections = ref({
   iterationApi: false,
-  emotionApi: false
+  emotionApi: false,
+  emotionAudio: false
+})
+
+const emotionList = [
+  { value: 'neutral', label: '平静', icon: '😐' },
+  { value: 'happy', label: '开心', icon: '😊' },
+  { value: 'confused', label: '困惑', icon: '😕' },
+  { value: 'sad', label: '伤心', icon: '😢' },
+  { value: 'angry', label: '生气', icon: '😠' },
+  { value: 'excited', label: '兴奋', icon: '🤩' }
+]
+
+const showWeightPicker = ref(false)
+const weightPickerTarget = ref('gpt')
+const weightFiles = ref([])
+const weightFilesLoading = ref(false)
+const showUploadModal = ref(false)
+const publishingCharId = ref(null)
+const uploadDescription = ref('')
+
+const publishableCharacters = computed(() => {
+  return characters.value.filter(char => char.source === 'admin' || char.source === 'user')
 })
 
 onMounted(async () => {
@@ -519,7 +742,11 @@ function selectCharacter(char) {
     has_api_key: char.api_config?.has_api_key || false,
     api_model_name: char.api_config?.model_name || '',
     use_main_api_for_iteration: !iterationConfig,
-    iteration_apis: char.iteration_apis || [],
+    iteration_provider_type: iterationConfig?.provider_type || 'ollama',
+    iteration_base_url: iterationConfig?.base_url || '',
+    iteration_api_key: iterationConfig?.api_key || '',
+    has_iteration_api_key: iterationConfig?.has_api_key || false,
+    iteration_model_name: iterationConfig?.model_name || '',
     use_main_api_for_emotion: !emotionConfig,
     emotion_provider_type: emotionConfig?.provider_type || 'ollama',
     emotion_base_url: emotionConfig?.base_url || '',
@@ -532,7 +759,22 @@ function selectCharacter(char) {
     greeting_night: char.greeting_templates?.night || '',
     system_prompt: char.llm_config?.system_prompt || '',
     rag_collection: char.rag_config?.collection_name || '',
-    rag_enabled: char.rag_config?.enabled ?? true
+    rag_enabled: char.rag_config?.enabled ?? true,
+    tts_gpt_weight: char.tts_config?.gpt_weight || '',
+    tts_sovits_weight: char.tts_config?.sovits_weight || '',
+    tts_port: char.tts_config?.port || 9880,
+    tts_version: char.tts_config?.version || 'v2ProPlus',
+    tts_ref_audio_path: char.tts_config?.ref_audio_path || '',
+    tts_ref_audio_text: char.tts_config?.ref_audio_text || '',
+    emotions: char.emotions || {
+      neutral: { ref_audio_path: '', ref_text: '' },
+      happy: { ref_audio_path: '', ref_text: '' },
+      confused: { ref_audio_path: '', ref_text: '' },
+      sad: { ref_audio_path: '', ref_text: '' },
+      angry: { ref_audio_path: '', ref_text: '' },
+      excited: { ref_audio_path: '', ref_text: '' }
+    },
+    iteration_apis: char.iteration_apis || []
   }
   apiTestResult.value = null
 }
@@ -556,7 +798,11 @@ function newCharacter() {
     has_api_key: false,
     api_model_name: '',
     use_main_api_for_iteration: true,
-    iteration_apis: [],
+    iteration_provider_type: 'ollama',
+    iteration_base_url: '',
+    iteration_api_key: '',
+    has_iteration_api_key: false,
+    iteration_model_name: '',
     use_main_api_for_emotion: true,
     emotion_provider_type: 'ollama',
     emotion_base_url: '',
@@ -566,7 +812,22 @@ function newCharacter() {
     greeting_morning: '',
     greeting_afternoon: '',
     greeting_evening: '',
-    greeting_night: ''
+    greeting_night: '',
+    tts_gpt_weight: '',
+    tts_sovits_weight: '',
+    tts_port: 9880,
+    tts_version: 'v2ProPlus',
+    tts_ref_audio_path: '',
+    tts_ref_audio_text: '',
+    emotions: {
+      neutral: { ref_audio_path: '', ref_text: '' },
+      happy: { ref_audio_path: '', ref_text: '' },
+      confused: { ref_audio_path: '', ref_text: '' },
+      sad: { ref_audio_path: '', ref_text: '' },
+      angry: { ref_audio_path: '', ref_text: '' },
+      excited: { ref_audio_path: '', ref_text: '' }
+    },
+    iteration_apis: []
   }
   apiTestResult.value = null
 }
@@ -591,44 +852,8 @@ function onProviderChange() {
 
 function onIterationApiToggle() {
   const char = editingCharacter.value
-  if (!char.use_main_api_for_iteration && char.iteration_apis.length === 0) {
-    char.iteration_apis.push({
-      provider_type: 'openai_compatible',
-      base_url: 'https://openrouter.ai/api/v1',
-      api_key: '',
-      model_name: ''
-    })
-  }
-}
-
-function addIterationApi() {
-  editingCharacter.value.iteration_apis.push({
-    provider_type: 'openai_compatible',
-    base_url: '',
-    api_key: '',
-    model_name: ''
-  })
-}
-
-function removeIterationApi(index) {
-  editingCharacter.value.iteration_apis.splice(index, 1)
-}
-
-function moveIterationApiUp(index) {
-  if (index > 0) {
-    const apis = editingCharacter.value.iteration_apis
-    const temp = apis[index]
-    apis[index] = apis[index - 1]
-    apis[index - 1] = temp
-  }
-}
-
-function moveIterationApiDown(index) {
-  const apis = editingCharacter.value.iteration_apis
-  if (index < apis.length - 1) {
-    const temp = apis[index]
-    apis[index] = apis[index + 1]
-    apis[index + 1] = temp
+  if (!char.use_main_api_for_iteration && char.iteration_provider_type === 'openai_compatible' && !char.iteration_base_url) {
+    char.iteration_base_url = 'https://openrouter.ai/api/v1'
   }
 }
 
@@ -713,10 +938,10 @@ async function saveCharacter() {
     const isMaskedKey = (key) => key && key.startsWith('*')
     
     const iterationApiConfig = editingCharacter.value.use_main_api_for_iteration ? null : {
-      provider_type: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].provider_type : 'ollama',
-      base_url: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].base_url : '',
-      api_key: editingCharacter.value.iteration_apis.length > 0 ? (isMaskedKey(editingCharacter.value.iteration_apis[0].api_key) ? '' : (editingCharacter.value.iteration_apis[0].api_key || '')) : '',
-      model_name: editingCharacter.value.iteration_apis.length > 0 ? editingCharacter.value.iteration_apis[0].model_name : ''
+      provider_type: editingCharacter.value.iteration_provider_type || 'ollama',
+      base_url: editingCharacter.value.iteration_base_url || '',
+      api_key: isMaskedKey(editingCharacter.value.iteration_api_key) ? '' : (editingCharacter.value.iteration_api_key || ''),
+      model_name: editingCharacter.value.iteration_model_name || ''
     }
     const emotionApiConfig = editingCharacter.value.use_main_api_for_emotion ? null : {
       provider_type: editingCharacter.value.emotion_provider_type || 'ollama',
@@ -741,7 +966,16 @@ async function saveCharacter() {
         afternoon: editingCharacter.value.greeting_afternoon || '',
         evening: editingCharacter.value.greeting_evening || '',
         night: editingCharacter.value.greeting_night || ''
-      }
+      },
+      tts_config: {
+        gpt_weight: editingCharacter.value.tts_gpt_weight || '',
+        sovits_weight: editingCharacter.value.tts_sovits_weight || '',
+        port: editingCharacter.value.tts_port || 9880,
+        version: editingCharacter.value.tts_version || 'v2ProPlus',
+        ref_audio_path: editingCharacter.value.tts_ref_audio_path || '',
+        ref_audio_text: editingCharacter.value.tts_ref_audio_text || ''
+      },
+      emotions: editingCharacter.value.emotions || {}
     }
     delete payload.api_provider_type
     delete payload.api_base_url
@@ -752,12 +986,21 @@ async function saveCharacter() {
     delete payload.greeting_evening
     delete payload.greeting_night
     delete payload.use_main_api_for_iteration
-    delete payload.has_iteration_api_key
+    delete payload.iteration_provider_type
+    delete payload.iteration_base_url
+    delete payload.iteration_api_key
+    delete payload.iteration_model_name
     delete payload.use_main_api_for_emotion
     delete payload.emotion_provider_type
     delete payload.emotion_base_url
     delete payload.emotion_api_key
     delete payload.emotion_model_name
+    delete payload.tts_gpt_weight
+    delete payload.tts_sovits_weight
+    delete payload.tts_port
+    delete payload.tts_version
+    delete payload.tts_ref_audio_path
+    delete payload.tts_ref_audio_text
 
     const response = await api.post('/characters', payload)
     if (response.success) {
@@ -812,6 +1055,165 @@ async function confirmImport() {
     isImporting.value = null
     pendingTemplate.value = null
   }
+}
+
+async function loadCommunityCharacters() {
+  try {
+    const response = await api.get('/community/characters')
+    if (response.success) {
+      communityCharacters.value = response.characters
+    }
+  } catch (e) {
+    console.error('Failed to load community characters:', e)
+  }
+}
+
+async function publishToCommunity() {
+  if (!editingCharacter.value) return
+  
+  try {
+    const response = await api.post('/community/publish', {
+      character_id: editingCharacter.value.id,
+      description: ''
+    })
+    if (response.success) {
+      showMessage('角色已发布到社区市场！', 'success')
+    }
+  } catch (e) {
+    showMessage('发布失败: ' + (e.detail || '未知错误'), 'error')
+  }
+}
+
+async function publishCharacterFromModal(char) {
+  publishingCharId.value = char.id
+  try {
+    const response = await api.post('/community/publish', {
+      character_id: char.id,
+      description: uploadDescription.value
+    })
+    if (response.success) {
+      showMessage(`角色「${char.name}」已发布到社区市场！`, 'success')
+      showUploadModal.value = false
+      uploadDescription.value = ''
+      await loadCommunityCharacters()
+    }
+  } catch (e) {
+    showMessage('发布失败: ' + (e.detail || '未知错误'), 'error')
+  } finally {
+    publishingCharId.value = null
+  }
+}
+
+async function importFromCommunity(char) {
+  importingCommunityId.value = char.id
+  
+  try {
+    const response = await api.post(`/community/import/${char.id}`)
+    if (response.success) {
+      showMessage(`角色「${char.name}」导入成功！`, 'success')
+      await loadCharacters()
+      await loadCommunityCharacters()
+    }
+  } catch (e) {
+    showMessage('导入失败: ' + (e.detail || '未知错误'), 'error')
+  } finally {
+    importingCommunityId.value = null
+  }
+}
+
+async function openWeightPicker(target) {
+  weightPickerTarget.value = target
+  showWeightPicker.value = true
+  weightFilesLoading.value = true
+  
+  try {
+    const response = await api.get('/admin/resources/list-weights')
+    if (response.success) {
+      weightFiles.value = response.files || []
+    }
+  } catch (e) {
+    console.error('Failed to load weight files:', e)
+  } finally {
+    weightFilesLoading.value = false
+  }
+}
+
+function selectWeightFile(file) {
+  if (weightPickerTarget.value === 'gpt') {
+    editingCharacter.value.tts_gpt_weight = file.path
+  } else {
+    editingCharacter.value.tts_sovits_weight = file.path
+  }
+  showWeightPicker.value = false
+}
+
+function addIterationApi() {
+  if (!editingCharacter.value) return
+  if (!editingCharacter.value.iteration_apis) {
+    editingCharacter.value.iteration_apis = []
+  }
+  editingCharacter.value.iteration_apis.push({
+    model_name: '',
+    api_key: '',
+    base_url: '',
+    provider_type: 'openai_compatible'
+  })
+}
+
+function removeIterationApi(index) {
+  if (!editingCharacter.value) return
+  editingCharacter.value.iteration_apis.splice(index, 1)
+}
+
+function moveIterationApiUp(index) {
+  if (!editingCharacter.value || index <= 0) return
+  const apis = editingCharacter.value.iteration_apis
+  const temp = apis[index]
+  apis[index] = apis[index - 1]
+  apis[index - 1] = temp
+}
+
+function moveIterationApiDown(index) {
+  if (!editingCharacter.value) return
+  const apis = editingCharacter.value.iteration_apis
+  if (index >= apis.length - 1) return
+  const temp = apis[index]
+  apis[index] = apis[index + 1]
+  apis[index + 1] = temp
+}
+
+async function scanEmotionFolders() {
+  if (!editingCharacter.value?.id) {
+    showMessage('请先保存角色后再扫描情绪文件夹', 'error')
+    return
+  }
+  
+  try {
+    const response = await api.post(`/admin/characters/${editingCharacter.value.id}/scan-emotions`, {
+      base_path: `E:\\world\\python\\march_7th\\resources\\emotions\\${editingCharacter.value.id}`
+    })
+    
+    if (response.success && response.emotions) {
+      const emotions = editingCharacter.value.emotions
+      for (const [emotion, config] of Object.entries(response.emotions)) {
+        if (emotions[emotion]) {
+          emotions[emotion].ref_audio_path = config.ref_audio_path || emotions[emotion].ref_audio_path
+          emotions[emotion].ref_text = config.ref_text || emotions[emotion].ref_text
+        }
+      }
+      showMessage(`已扫描并填充 ${Object.keys(response.emotions).length} 个情绪配置`, 'success')
+    }
+  } catch (e) {
+    showMessage('扫描失败: ' + (e.detail || '未知错误'), 'error')
+  }
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
 function showMessage(text, type = 'info') {
@@ -1345,49 +1747,253 @@ function showMessage(text, type = 'info') {
   cursor: default;
 }
 
-.section-hint {
-  color: #888;
-  font-size: 12px;
-  margin-bottom: 12px;
-  line-height: 1.5;
+.community-container {
+  padding: 20px;
 }
 
-.iteration-api-item {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 12px;
+.community-header {
+  margin-bottom: 20px;
+}
+
+.community-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 0;
+  font-size: 18px;
+}
+
+.community-header p {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 14px;
+}
+
+.community-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.community-card {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.community-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+}
+
+.community-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+}
+
+.community-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.community-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.community-info h4 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.community-author {
+  display: block;
+  font-size: 12px;
+  color: var(--accent-primary);
+  margin-bottom: 4px;
+}
+
+.community-model {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
   margin-bottom: 8px;
 }
 
-.iteration-api-header {
+.community-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 8px 0;
+  line-height: 1.4;
+}
+
+.community-stats {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.community-actions {
+  display: flex;
+  align-items: center;
+}
+
+.empty-community {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.empty-community .empty-icon {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.community-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.98) 0%, rgba(22, 33, 62, 0.98) 100%);
+  border: 1px solid var(--accent-primary);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 520px;
+  box-shadow: 0 20px 60px rgba(233, 69, 96, 0.3);
+}
+
+.modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
 }
 
-.iteration-api-index {
-  font-weight: 600;
-  color: #81c784;
-  font-size: 13px;
+.modal-header h3 {
+  color: var(--text-primary);
+  margin: 0;
 }
 
-.iteration-api-actions {
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: var(--accent-primary);
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.no-publishable {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+}
+
+.publishable-list {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.iteration-api-actions .btn-small {
-  padding: 2px 6px;
-  font-size: 12px;
-  min-width: auto;
+.publishable-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
 }
 
-.iteration-api-fields {
+.publishable-info {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.publishable-name {
+  font-weight: 500;
+}
+
+.publishable-model {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-btn .input-field {
+  flex: 1;
+}
+
+.input-with-btn .btn-small {
+  white-space: nowrap;
+}
+
+.emotion-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.emotion-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.emotion-header {
+  margin-bottom: 8px;
+}
+
+.emotion-name {
+  font-weight: 500;
+}
+
+.emotion-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .form-group.compact {
@@ -1396,12 +2002,130 @@ function showMessage(text, type = 'info') {
 
 .form-group.compact label {
   font-size: 12px;
-  margin-bottom: 2px;
+  color: var(--text-secondary);
+}
+
+.weight-picker-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.weight-picker-content {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 20px;
+  width: 500px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.weight-picker-content h3 {
+  margin-bottom: 16px;
+}
+
+.weight-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.weight-file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.weight-file-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.weight-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weight-file-name {
+  font-weight: 500;
+}
+
+.weight-file-size {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.weight-file-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent-color);
+  color: white;
+}
+
+.iteration-api-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.iteration-api-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.iteration-api-index {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent-color);
+}
+
+.iteration-api-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.iteration-api-actions .btn-small {
+  padding: 4px 8px;
+  font-size: 11px;
+  min-width: 28px;
+}
+
+.iteration-api-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group.compact {
+  margin-bottom: 0;
+}
+
+.form-group.compact label {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .form-group.compact .input-field {
   font-size: 13px;
-  padding: 6px 8px;
+  padding: 8px 10px;
 }
-
 </style>

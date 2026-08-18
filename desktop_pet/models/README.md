@@ -1,34 +1,46 @@
-# 桌宠模型文件夹
+# Sherpa-ONNX 中文唤醒词模型
 
-本目录包含桌宠运行所需的模型文件。
+## 模型信息
+- 模型名称: sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01
+- 模型大小: 3.3MB
+- 训练数据: WenetSpeech (10000小时中文数据)
+- 建模单元: 拼音（声母 + 韵母）
 
-## 文件夹说明
+## 下载模型
 
-| 文件夹 | 说明 | 状态 |
-|--------|------|------|
-| `asr_model/` | ASR语音识别模型 | 需从网盘下载 |
-
-## ASR语音识别模型下载
-
-**百度网盘链接**: https://pan.baidu.com/s/1AZMToyyzKdWhumaSeNWPcQ
-**提取码**: 3yue
-
-### 包含文件
-
-下载 `asr_model` 文件夹后，将其移动到 `desktop_pet/models/` 目录。
-
-最终目录结构应为：
+### 方法1: 从 GitHub 下载
+```bash
+# Windows PowerShell
+cd e:\world\python\march_7th\desktop_pet\models
+Invoke-WebRequest -Uri "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2" -OutFile "model.tar.bz2"
+tar -xf model.tar.bz2
+mv sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/* .
+rm -r sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01 model.tar.bz2
 ```
-desktop_pet/models/
-├── asr_model/           # 从网盘下载后放入
-│   ├── encoder-epoch-99-avg-1.onnx
-│   ├── encoder-epoch-99-avg-1.int8.onnx
-│   ├── decoder-epoch-99-avg-1.onnx
-│   ├── decoder-epoch-99-avg-1.int8.onnx
-│   ├── joiner-epoch-99-avg-1.onnx
-│   ├── joiner-epoch-99-avg-1.int8.onnx
-│   ├── bpe.model
-│   ├── bpe.vocab
-│   └── tokens.txt
-└── README.md  (本文件)
+
+### 方法2: 从 ModelScope 下载（国内推荐）
+```bash
+pip install modelscope
+python download_model.py
 ```
+
+## 模型文件结构
+```
+models/
+├── encoder.onnx      # 编码器模型
+├── decoder.onnx      # 解码器模型
+├── joiner.onnx       # 连接器模型
+├── tokens.txt        # 拼音Token映射表
+└── keywords.txt      # 唤醒词配置文件
+```
+
+## 唤醒词配置
+在 keywords.txt 中配置唤醒词，格式：
+```
+s an1 y ve4 q i1 @三月七
+```
+
+拼音格式说明：
+- 每个音节用空格分隔
+- 声调用数字表示（1=阴平, 2=阳平, 3=上声, 4=去声, 5=轻声）
+- @后面是显示的关键词名称

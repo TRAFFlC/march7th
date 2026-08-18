@@ -1,32 +1,25 @@
 @echo off
 chcp 65001 >nul
-
 echo ========================================
-echo    Music7ox - Starting
+echo   三月七语音对话系统启动脚本
 echo ========================================
 echo.
 
-echo [1/3] Starting backend...
-start "Music7ox-Backend" cmd /k "cd /d %~dp0 && python -m api.main"
+echo [1/2] 启动 FastAPI 后端...
+start "FastAPI Backend" cmd /k "cd /d %~dp0 && python -m api.main"
 timeout /t 3 /nobreak >nul
 
-echo [2/3] Starting frontend...
-start "Music7ox-Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
-timeout /t 2 /nobreak >nul
-
-echo [3/3] Starting desktop pet...
-start "Music7ox-DesktopPet" cmd /k "cd /d %~dp0desktop_pet && npm start"
+echo [2/2] 启动 Vue 前端...
+start "Vue Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
 
 echo.
 echo ========================================
-echo    Service URLs
-echo ========================================
-echo   Backend API:  http://127.0.0.1:8000
-echo   API Docs:     http://127.0.0.1:8000/docs
-echo   Frontend:     http://localhost:5173
+echo   服务已启动！
+echo   后端 API: http://127.0.0.1:8000
+echo   API 文档: http://127.0.0.1:8000/docs
+echo   前端页面: http://localhost:5173
 echo ========================================
 echo.
-echo All services started!
+echo 请在前端页面打开后访问系统
 echo.
-echo Press any key to exit this window...
-pause >nul
+pause

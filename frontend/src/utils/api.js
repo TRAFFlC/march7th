@@ -20,21 +20,11 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response.data,
-  async (error) => {
+  (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      try {
-        const response = await axios.post(API_BASE + '/auth/auto-login')
-        if (response.data?.success) {
-          localStorage.setItem('token', response.data.token)
-          localStorage.setItem('user', JSON.stringify(response.data.user))
-          error.config.headers.Authorization = `Bearer ${response.data.token}`
-          return axios(error.config)
-        }
-      } catch (e) {
-        console.error('Auto login retry failed:', e)
-      }
+      window.location.href = '/login'
     }
     const errorData = error.response?.data || { detail: error.message || '网络错误' }
     return Promise.reject(errorData)

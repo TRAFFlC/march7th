@@ -491,7 +491,8 @@ def get_rag_collection_info(persist_dir: Path = None):
     collection_names = client.list_collections()
 
     result = []
-    for coll_name in collection_names:
+    for coll in collection_names:
+        coll_name = coll.name if hasattr(coll, "name") else coll
         if not isinstance(coll_name, str):
             coll_name = str(coll_name)
         

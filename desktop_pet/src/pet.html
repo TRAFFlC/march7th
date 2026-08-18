@@ -21,6 +21,8 @@
   </div>
   
   <script>
+    const { ipcRenderer } = require('electron');
+    
     console.log('[Pet] ===== 脚本加载 =====');
     console.log('[Pet] 使用离线 ASR (sherpa-onnx)');
     
@@ -33,7 +35,7 @@
     let lastSentPosition = { x: 0, y: 0 };
     
     async function loadPetImage(type = 'normal') {
-      const imagePath = await window.petAPI.getPetImage(type);
+      const imagePath = await ipcRenderer.invoke('get-pet-image', type);
       petImage.src = imagePath;
     }
     
@@ -44,7 +46,7 @@
         const dx = Math.abs(pendingPosition.x - lastSentPosition.x);
         const dy = Math.abs(pendingPosition.y - lastSentPosition.y);
         if (dx > 1 || dy > 1) {
-          window.petAPI.petDragMove(pendingPosition.x, pendingPosition.y);
+          ipcRenderer.invoke('pet-drag-move', pendingPosition.x, pendingPosition.y);
           lastSentPosition = { x: pendingPosition.x, y: pendingPosition.y };
         }
         pendingPosition = null;
@@ -63,7 +65,7 @@
         y: e.clientY
       };
       lastSentPosition = { x: e.screenX, y: e.screenY };
-      window.petAPI.petDragStart(dragOffset);
+      ipcRenderer.invoke('pet-drag-start', dragOffset);
     });
     
     document.body.addEventListener('mousemove', (e) => {
@@ -89,10 +91,10 @@
         cancelAnimationFrame(rafId);
         rafId = null;
       }
-      window.petAPI.petDragEnd();
+      ipcRenderer.invoke('pet-drag-end');
       
       if (clickDuration < 200 && moveDistance < 5) {
-        window.petAPI.petClicked();
+        ipcRenderer.invoke('pet-clicked');
         loadPetImage('happy');
         setTimeout(() => loadPetImage('normal'), 2000);
       }
@@ -103,10 +105,10 @@
         isDragging = false;
         pendingPosition = null;
         if (rafId) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-        window.petAPI.petDragEnd();
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      ipcRenderer.invoke('pet-drag-end');
       }
     });
     
@@ -138,7 +140,7 @@
 
       async _initWakeWord() {
         try {
-          const result = await window.petAPI.getWakeWord(this.characterId);
+          const result = await ipcRenderer.invoke('get-wake-word', this.characterId);
           if (result.success && result.wakeWord) {
             this.wakeWord = result.wakeWord;
             console.log(`[VoiceManager] 唤醒词已加载: ${this.wakeWord}`);
@@ -149,55 +151,61 @@
       }
 
       _setupAsrListeners() {
-        window.petAPI.onAsrReady(() => {
+        ipcRenderer.on('asr-ready', () => {
           console.log('[VoiceManager] ASR 服务就绪');
         });
 
-        window.petAPI.onAsrListening((listening) => {
+        ipcRenderer.on('asr-listening', (event, listening) => {
           console.log('[VoiceManager] ASR 监听状态:', listening);
         });
 
-        window.petAPI.onAsrPartial((text) => {
+        ipcRenderer.on('asr-partial', (event, text) => {
           console.log('[VoiceManager] 实时识别:', text);
-          if (this.onInterimResult && this._wakeDetected && !this._isProcessing) {
+          if (this.onInterimResult && this._wakeDetected) {
             this.onInterimResult(text);
           }
         });
 
-        window.petAPI.onAsrResult(async (text) => {
+        ipcRenderer.on('asr-result', async (event, text) => {
           console.log('[VoiceManager] 最终结果:', text, '| wakeDetected:', this._wakeDetected, '| isProcessing:', this._isProcessing);
           
-          if (this._isProcessing) {
-            console.log('[VoiceManager] 已有请求在处理中，忽略新结果');
+          if (!this._wakeDetected) {
+            console.log('[VoiceManager] 未检测到唤醒词，忽略结果');
             return;
           }
           
-          if (this._wakeDetected && text) {
-            this._isProcessing = true;
-            this._wakeDetected = false;
-            this.setState('processing');
-            
-            console.log('[VoiceManager] 立即停止 ASR，防止继续捕捉声音');
-            await window.petAPI.asrStop();
-            
-            if (this.onSpeechResult) {
-              this.onSpeechResult(text);
-            }
+          if (this._isProcessing) {
+            console.log('[VoiceManager] 正在处理中，忽略新的语音结果');
+            return;
+          }
+          
+          if (!text || !text.trim()) {
+            console.log('[VoiceManager] 空文本，忽略');
+            return;
+          }
+          
+          this._isProcessing = true;
+          
+          await ipcRenderer.invoke('asr-stop');
+          console.log('[VoiceManager] 已停止 ASR，防止继续捕捉');
+          
+          this.setState('processing');
+          
+          if (this.onSpeechResult) {
+            this.onSpeechResult(text);
           }
         });
 
-        window.petAPI.onAsrError((error) => {
+        ipcRenderer.on('asr-error', (event, error) => {
           console.error('[VoiceManager] ASR 错误:', error);
           showVoiceBubble('语音识别出错: ' + error);
-          this._isProcessing = false;
-          this._wakeDetected = false;
         });
       }
 
       async updateCharacter(characterId) {
         this.characterId = characterId || 'march7th';
         try {
-          const result = await window.petAPI.getWakeWord(this.characterId);
+          const result = await ipcRenderer.invoke('get-wake-word', this.characterId);
           if (result.success && result.wakeWord) {
             this.wakeWord = result.wakeWord;
             console.log(`[VoiceManager] 唤醒词已更新: ${this.wakeWord}`);
@@ -217,7 +225,7 @@
         console.log('[VoiceManager] 启动离线 ASR, preserveWakeState:', preserveWakeState);
         
         if (this._isProcessing) {
-          console.log('[VoiceManager] 正在处理中，拒绝启动 ASR');
+          console.log('[VoiceManager] 正在处理中，无法启动新的监听');
           return false;
         }
         
@@ -228,7 +236,7 @@
         
         this.setState('listening');
         
-        const result = await window.petAPI.asrStart();
+        const result = await ipcRenderer.invoke('asr-start');
         console.log('[VoiceManager] ASR 启动结果:', result);
         
         return result.success;
@@ -236,17 +244,23 @@
 
       async stopListening() {
         console.log('[VoiceManager] 停止 ASR');
-        await window.petAPI.asrStop();
+        await ipcRenderer.invoke('asr-stop');
         this._wakeDetected = false;
         this._isProcessing = false;
         this.setState('idle');
       }
 
-      finishProcessing() {
-        console.log('[VoiceManager] 处理完成，释放锁');
+      resetToListening() {
+        this._wakeDetected = false;
+        this._isProcessing = false;
+        if (this.state === 'processing') {
+          this.setState('listening');
+        }
+      }
+
+      completeProcessing() {
         this._isProcessing = false;
         this._wakeDetected = false;
-        this.setState('idle');
       }
     }
 
@@ -277,7 +291,7 @@
       loadPetImage('thinking');
       
       try {
-        const result = await window.petAPI.voiceResult(text);
+        const result = await ipcRenderer.invoke('voice-result', text);
         console.log('[Pet] 后端返回:', result);
         console.log('[Pet] result.success:', result.success);
         console.log('[Pet] result.response:', result.response ? result.response.substring(0, 50) + '...' : 'null');
@@ -295,13 +309,12 @@
         loadPetImage('normal');
       }
       
-      voiceManager.finishProcessing();
+      voiceManager.completeProcessing();
       
-      console.log('[Pet] 等待麦克风释放后重启 KWS...');
-      await new Promise(r => setTimeout(r, 500));
-      console.log('[Pet] 启动 KWS...');
-      const kwsResult = await window.petAPI.kwsStart();
-      console.log('[Pet] KWS 启动结果:', kwsResult);
+      setTimeout(async () => {
+        console.log('[Pet] 语音交互结束，重启 KWS');
+        await ipcRenderer.invoke('kws-start');
+      }, 500);
     };
 
     function updateVoiceIndicator(state) {
@@ -325,7 +338,7 @@
       }
     }
 
-    window.petAPI.onVoiceBubble((data) => {
+    ipcRenderer.on('voice-bubble', (event, data) => {
       console.log('[Pet] 收到 voice-bubble 事件:', typeof data === 'object' ? 'object' : 'string');
       if (typeof data === 'object' && data.text) {
         showVoiceBubble(data.text);
@@ -431,7 +444,7 @@
 
     voiceIndicator.style.display = 'flex';
 
-    window.petAPI.onEmotionChange((emotion) => {
+    ipcRenderer.on('emotion-change', (event, emotion) => {
       const emotionImageMap = {
         neutral: 'normal',
         happy: 'happy',
@@ -444,27 +457,25 @@
       loadPetImage(imageType);
     });
 
-    window.petAPI.onUpdatePetImage((imageType) => {
+    ipcRenderer.on('update-pet-image', (event, imageType) => {
       loadPetImage(imageType);
     });
 
-    window.petAPI.onWakeWordDetected(async (keyword) => {
+    ipcRenderer.on('wake-word-detected', async (event, keyword) => {
       console.log('[Pet] ===== 收到唤醒词事件 =====');
       console.log('[Pet] keyword:', keyword);
       console.log('[Pet] voiceManager.state:', voiceManager.state);
       console.log('[Pet] voiceManager._isProcessing:', voiceManager._isProcessing);
       
       if (voiceManager._isProcessing) {
-        console.log('[Pet] 正在处理中，忽略唤醒词');
+        console.log('[Pet] 正在处理中，忽略新的唤醒词');
         return;
       }
       
       if (voiceManager.state === 'idle') {
         console.log('[Pet] 开始处理唤醒...');
-        await window.petAPI.kwsStop();
+        await ipcRenderer.invoke('kws-stop');
         console.log('[Pet] 已停止 KWS 服务，等待麦克风释放...');
-        
-        await new Promise(r => setTimeout(r, 300));
         
         loadPetImage('surprised');
         setTimeout(() => loadPetImage('happy'), 800);
@@ -475,15 +486,17 @@
         
         showVoiceBubble('我在！请说...', true);
         
-        console.log('[Pet] 启动离线 ASR, wakeDetected:', voiceManager._wakeDetected);
-        await voiceManager.startListening(true);
-        voiceManager.setState('awake');
+        setTimeout(async () => {
+          console.log('[Pet] 启动离线 ASR, wakeDetected:', voiceManager._wakeDetected);
+          await voiceManager.startListening(true);
+          voiceManager.setState('awake');
+        }, 500);
       } else {
         console.log('[Pet] 当前状态不是 idle，跳过处理');
       }
     });
 
-    window.petAPI.onWakeWordListening((listening) => {
+    ipcRenderer.on('wake-word-listening', (event, listening) => {
       console.log('[Pet] 唤醒词监听状态:', listening);
       if (listening) {
         voiceIndicator.classList.add('kws-active');
@@ -492,12 +505,12 @@
       }
     });
 
-    window.petAPI.onWakeWordError((error) => {
+    ipcRenderer.on('wake-word-error', (event, error) => {
       console.error('[Pet] 唤醒词错误:', error);
       showVoiceBubble('唤醒词检测出错');
     });
 
-    window.petAPI.onVoiceCommand((command) => {
+    ipcRenderer.on('voice-command', (event, command) => {
       if (command === 'start') {
         voiceManager.startListening();
       } else if (command === 'stop') {

@@ -24,7 +24,7 @@ class PersonaManager:
     ):
         self.persona_file = Path(persona_file or config.PERSONA_FILE)
         self.db_dir = Path(db_dir or config.PERSONA_DB_DIR)
-        self.min_rating = min_rating or config.PERSONA_MIN_RATING
+        self.min_rating = min_rating if min_rating is not None else config.PERSONA_MIN_RATING
         self.top_k = top_k or config.PERSONA_TOP_K
         self.decay_factor = decay_factor or config.REPETITION_DECAY
         self.reset_hours = reset_hours or config.REPETITION_RESET_HOURS
@@ -263,10 +263,11 @@ class PersonaManager:
                     1 - usage_count * self.decay_factor
                 )
 
-            adjusted_score = distance * penalty
+            penalty = max(penalty, 1e-6)
+            adjusted_score = distance / penalty
             penalized.append((doc, meta, adjusted_score))
 
-        return sorted(penalized, key=lambda x: x[2], reverse=True)
+        return sorted(penalized, key=lambda x: x[2])
 
     def _increment_usage_count(self, record_id: str):
         if not record_id or not self.persona_file.exists():

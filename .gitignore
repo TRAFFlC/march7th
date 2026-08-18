@@ -1,12 +1,14 @@
 .env
 logs/
+logs_archive/
 *.ckpt
 *.pth
 *.safetensors
 *.bin
+*.onnx
+models/
 rag_db/
 persona_db/
-models/
 __pycache__/
 *.pyc
 .venv/

@@ -3,7 +3,7 @@
     {
       "id": "march7th",
       "name": "三月七",
-      "avatar_path": "frontend/public/emojis/三月七_盯.png",
+      "avatar_path": "E:\\world\\python\\march_7th\\frontend\\public\\emojis\\三月七_盯.png",
       "wake_word": "三月七",
       "llm_config": {
         "model": "deepseek-r1:8b",
@@ -13,9 +13,9 @@
         "max_tokens": 1024
       },
       "tts_config": {
-        "gpt_weight": "resources/tts/models/march7th-e15.ckpt",
-        "sovits_weight": "resources/tts/models/march7th_e8_s5040.pth",
-        "ref_audio_path": "resources/tts/ref_audio/march7th_ref.wav",
+        "gpt_weight": "E:\\world\\python\\march_7th\\resources\\march7th-e15.ckpt",
+        "sovits_weight": "E:\\world\\python\\march_7th\\resources\\march7th_e8_s5040.pth",
+        "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\neutral\\march7th\\vocal_0e7364439be39932.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000174720.wav",
         "ref_audio_text": "你身体里有颗星核，我有独一无二的六相冰，丹恒有。",
         "port": 9880,
         "version": "v2ProPlus"
@@ -47,11 +47,21 @@
       },
       "iteration_api_config": {
         "provider_type": "openai_compatible",
-        "base_url": "https://openrouter.ai/api/v1",
+        "base_url": "https://api.chatanywhere.tech/v1",
         "api_key": "",
-        "model_name": "minimax/minimax-m2.5:free"
+        "api_key_env": "CHATANYWHERE_API_KEY",
+        "model_name": "gpt-5.4-nano"
       },
-      "iteration_apis": [],
+      "iteration_apis": [
+        {
+          "provider_type": "openai_compatible",
+          "base_url": "https://openrouter.ai/api/v1",
+          "api_key": "",
+          "api_key_env": "OPENROUTER_API_KEY",
+          "has_api_key": true,
+          "model_name": "minimax/minimax-m2.5:free"
+        }
+      ],
       "emotion_api_config": null,
       "emotion_images": {
         "neutral": "",
@@ -63,28 +73,28 @@
       },
       "emotions": {
         "neutral": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/neutral/march7th/vocal_0e7364439be39932.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000174720.wav",
-          "ref_text": "丹恒一票，这就三票了，去哪儿还不是咱们一句话的事儿。"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\neutral\\march7th\\vocal_0e7364439be39932.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000174720.wav",
+          "ref_text": "你身体里有颗星核，我有独一无二的六相冰，丹恒有。"
         },
         "happy": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/happy/march7th/vocal_184f5248cd09351e.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000140160.wav",
-          "ref_text": "保持平和的心态，想好你要创造的事物。"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\happy\\march7th\\vocal_184f5248cd09351e.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000140160.wav",
+          "ref_text": "嘿嘿嘿，说来说去，还是得归功于两位师傅教的好。"
         },
         "confused": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/confused/march7th/vocal_02826133dc000bde.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000131520.wav",
-          "ref_text": "但内心深处有点痛快，这是不是堕入黑暗面的开始？"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\confused\\march7th\\vocal_02826133dc000bde.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000131520.wav",
+          "ref_text": "什么情况？嘴巴自己开口了，这可肯定不对劲。"
         },
         "sad": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/sad/march7th/vocal_151c01c860e0ae4e.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000144320.wav",
-          "ref_text": "这是，哎呦你别理他，这家伙每次自我介绍都要玩点花样。"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\sad\\march7th\\vocal_151c01c860e0ae4e.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000144320.wav",
+          "ref_text": "哎，真遗憾，本来还想美美地度过这几天。"
         },
         "angry": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/angry/march7th/vocal_224fd690db49646f.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000240960_0000368640.wav",
-          "ref_text": "不信，哼，我背给你听。"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\angry\\march7th\\vocal_224fd690db49646f.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000240960_0000368640.wav",
+          "ref_text": "渔公案这么好的书，他说撕就撕，太气人了。"
         },
         "excited": {
-          "ref_audio_path": "resources/tts/ref_audio/emotions/march7th/excited/march7th/vocal_2256d153905f04e7.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000155840.wav",
-          "ref_text": "别看小谛听只是叫了几声，他发言的信息量可是非常大的哟。"
+          "ref_audio_path": "E:\\world\\python\\march_7th\\resources\\emotions\\march7th\\excited\\march7th\\vocal_2256d153905f04e7.wav.reformatted_vocals.flac_main_vocal.wav_10.wav_0000000000_0000155840.wav",
+          "ref_text": "啊，简直就是仙舟式家长不行，你又不是我的家长。"
         }
       },
       "greeting_templates": {

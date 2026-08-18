@@ -128,9 +128,9 @@ function createPetWindow() {
     focusable: true,
     hasShadow: false,
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'pet_preload.js')
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: false
     }
   });
 

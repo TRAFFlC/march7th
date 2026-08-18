@@ -1,5 +1,4 @@
 import logging
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -14,19 +13,6 @@ LOG_FILE = LOG_DIR / "app.log"
 def _ensure_log_dir():
     if not LOG_DIR.exists():
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-
-class JsonFormatter(logging.Formatter):
-    def format(self, record):
-        log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "level": record.levelname,
-            "module": record.module,
-            "message": record.getMessage(),
-        }
-        if record.exc_info and record.exc_info[0]:
-            log_entry["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_entry, ensure_ascii=False)
 
 
 class Logger:
@@ -50,15 +36,10 @@ class Logger:
         if self._logger.handlers:
             self._logger.handlers.clear()
 
-        use_json = os.environ.get("LOG_FORMAT", "text").lower() == "json"
-
-        if use_json:
-            formatter = JsonFormatter()
-        else:
-            formatter = logging.Formatter(
-                fmt="[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S"
-            )
+        formatter = logging.Formatter(
+            fmt="[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
 
         file_handler = logging.FileHandler(
             LOG_FILE,

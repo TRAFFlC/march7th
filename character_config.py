@@ -4,6 +4,7 @@
 支持配置文件热重载
 """
 import json
+import logging
 import os
 import threading
 import time
@@ -12,11 +13,10 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field, asdict
 import copy
 
-from llm_provider import APIConfig as _APIConfig
-
 
 BASE_DIR = Path(__file__).parent
 CHARACTERS_CONFIG_PATH = BASE_DIR / "config" / "characters.json"
+logger = logging.getLogger(__name__)
 
 from config import GPT_SOVITS_DIR
 
@@ -39,6 +39,14 @@ def resolve_avatar_path(path: str) -> str:
     if p.is_absolute():
         return str(p)
     return str(BASE_DIR / path)
+
+
+def resolve_api_key(api_data: Dict[str, Any], default_env_var: str = "") -> str:
+    api_key = api_data.get("api_key", "")
+    env_var_name = api_data.get("api_key_env") or default_env_var
+    if env_var_name:
+        return os.environ.get(env_var_name, api_key)
+    return api_key
 
 
 @dataclass
@@ -91,6 +99,7 @@ class APIConfig:
     base_url: str = ""
     api_key: str = ""
     model_name: str = ""
+    api_key_env: str = ""
 
 
 @dataclass
@@ -159,10 +168,12 @@ class CharacterConfig:
         rag_data = data.get("rag_config", {})
         persona_data = data.get("persona_config", {})
         memory_data = data.get("memory_config", {})
-        api_data = data.get("api_config", {})
+        api_data = dict(data.get("api_config", {}))
         iteration_api_data = data.get("iteration_api_config")
         iteration_apis_data = data.get("iteration_apis", [])
         emotion_api_data = data.get("emotion_api_config")
+
+        api_data["api_key"] = resolve_api_key(api_data)
 
         tts_data_resolved = {
             "gpt_weight": resolve_tts_path(tts_data.get("gpt_weight", "")),
@@ -187,15 +198,20 @@ class CharacterConfig:
 
         iteration_api_config = None
         if iteration_api_data and isinstance(iteration_api_data, dict):
-            _iter_api_key = iteration_api_data.get("api_key", "")
-            if not _iter_api_key:
-                from personal_config import OPENROUTER_API_KEY
-                if OPENROUTER_API_KEY and iteration_api_data.get("base_url", "").startswith("https://openrouter.ai"):
-                    iteration_api_data = dict(iteration_api_data, api_key=OPENROUTER_API_KEY)
+            iteration_api_data = dict(iteration_api_data)
+            default_env_var = ""
+            base_url = iteration_api_data.get("base_url", "")
+            if base_url.startswith("https://openrouter.ai"):
+                default_env_var = "OPENROUTER_API_KEY"
+            elif "chatanywhere" in base_url:
+                default_env_var = "CHATANYWHERE_API_KEY"
+            iteration_api_data["api_key"] = resolve_api_key(iteration_api_data, default_env_var)
             iteration_api_config = APIConfig(**iteration_api_data)
 
         emotion_api_config = None
         if emotion_api_data and isinstance(emotion_api_data, dict):
+            emotion_api_data = dict(emotion_api_data)
+            emotion_api_data["api_key"] = resolve_api_key(emotion_api_data)
             emotion_api_config = APIConfig(**emotion_api_data)
 
         return cls(
@@ -210,7 +226,11 @@ class CharacterConfig:
             memory_config=MemoryConfig(**memory_data),
             api_config=APIConfig(**api_data),
             iteration_api_config=iteration_api_config,
-            iteration_apis=iteration_apis_data if isinstance(iteration_apis_data, list) else [],
+            iteration_apis=[
+                dict(api_item, api_key=resolve_api_key(dict(api_item)))
+                for api_item in iteration_apis_data
+                if isinstance(api_item, dict)
+            ],
             emotion_api_config=emotion_api_config,
             emotions=emotions_resolved,
             emotion_images=data.get("emotion_images", {
@@ -308,7 +328,7 @@ class CharacterConfigManager:
             try:
                 callback()
             except Exception as e:
-                print(f"[ConfigManager] 回调执行失败: {e}")
+                logger.warning("ConfigManager 回调执行失败: %s", e)
 
     def start_file_watcher(self, interval: int = 30) -> None:
         if self._watcher_thread and self._watcher_thread.is_alive():
@@ -321,7 +341,7 @@ class CharacterConfigManager:
                 try:
                     self.check_and_reload()
                 except Exception as e:
-                    print(f"[ConfigManager] 文件监控错误: {e}")
+                    logger.warning("ConfigManager 文件监控错误: %s", e)
 
         self._watcher_thread = threading.Thread(target=_watch, daemon=True)
         self._watcher_thread.start()

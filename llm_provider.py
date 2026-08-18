@@ -1,12 +1,21 @@
 import time
 import json
+import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from logger import get_logger as _get_logger
-
-_llm_log = _get_logger()
 from typing import Generator, List, Dict, Any, Optional
+
+
+logger = logging.getLogger(__name__)
+
+
+def mask_api_key(api_key: str) -> str:
+    if not api_key:
+        return ""
+    if len(api_key) <= 4:
+        return "****"
+    return f"****{api_key[-4:]}"
 
 
 class BaseLLMProvider(ABC):
@@ -188,13 +197,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             if retry_after:
                 try:
                     delay = float(retry_after)
-                    _llm_log.debug(f"[OpenAI Compatible] 检测到 Retry-After 头: {delay}秒")
+                    logger.info("[OpenAI Compatible] 检测到 Retry-After 头: %s秒", delay)
                     return min(delay, max_delay)
                 except ValueError:
                     pass
         delay = self.retry_delay * (2**attempt)
         delay = min(delay, max_delay)
-        _llm_log.debug(f"[OpenAI Compatible] 指数退避计算: 第{attempt + 1}次重试, 等待{delay}秒")
+        logger.info("[OpenAI Compatible] 指数退避计算: 第%s次重试, 等待%s秒", attempt + 1, delay)
         return delay
 
     def _is_rate_limited(self, response) -> bool:
@@ -246,10 +255,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 if hasattr(client, "post") and not hasattr(client, "Client"):
                     response = client.post(url, headers=headers, json=body, timeout=120.0)
                     if self._is_rate_limited(response):
-                        _llm_log.warning(f"[OpenAI Compatible] 收到 429 状态码 (速率限制), 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                        logger.warning("[OpenAI Compatible] 收到 429 状态码, 尝试次数: %s/%s", attempt + 1, self.max_retries + 1)
                         if attempt < self.max_retries:
                             delay = self._calculate_retry_delay(attempt, dict(response.headers))
-                            _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                            logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                             time.sleep(delay)
                             continue
                         else:
@@ -263,10 +272,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     with client.Client(timeout=120.0) as http_client:
                         resp = http_client.post(url, headers=headers, json=body)
                         if self._is_rate_limited(resp):
-                            _llm_log.warning(f"[OpenAI Compatible] 收到 429 状态码 (速率限制), 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                            logger.warning("[OpenAI Compatible] 收到 429 状态码, 尝试次数: %s/%s", attempt + 1, self.max_retries + 1)
                             if attempt < self.max_retries:
                                 delay = self._calculate_retry_delay(attempt, dict(resp.headers))
-                                _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                                logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                                 time.sleep(delay)
                                 continue
                             else:
@@ -277,13 +286,19 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                                 }
                         response_json = resp.json()
 
-                _llm_log.debug(f"[OpenAI Compatible] API响应状态: ok, 内容长度={len(json.dumps(response_json, ensure_ascii=False))}")
+                logger.debug(
+                    "[OpenAI Compatible] API响应摘要: base_url=%s model=%s api_key=%s keys=%s",
+                    self.base_url,
+                    self.model_name,
+                    mask_api_key(self.api_key),
+                    list(response_json.keys())[:10],
+                )
 
                 resp_error = response_json.get("error")
                 if resp_error:
                     error_msg = resp_error if isinstance(resp_error, str) else resp_error.get("message", str(resp_error))
                     error_code = resp_error.get("code") if isinstance(resp_error, dict) else None
-                    _llm_log.error(f"[OpenAI Compatible] API返回错误: code={error_code}, message={error_msg}")
+                    logger.warning("[OpenAI Compatible] API返回错误: code=%s, message=%s", error_code, error_msg)
                     return {
                         "content": "",
                         "usage": {"input_tokens": 0, "output_tokens": 0},
@@ -296,17 +311,17 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 choices = response_json.get("choices", [])
                 if choices:
                     content = choices[0].get("message", {}).get("content", "")
-                    _llm_log.debug(f"[OpenAI Compatible] 提取到内容长度: {len(content)} 字符")
+                    logger.debug("[OpenAI Compatible] 提取到内容长度: %s 字符", len(content))
 
                 resp_usage = response_json.get("usage", {})
-                _llm_log.debug(f"[OpenAI Compatible] usage字段: {resp_usage}")
+                logger.debug("[OpenAI Compatible] usage字段: %s", resp_usage)
                 if resp_usage:
                     usage["input_tokens"] = resp_usage.get("prompt_tokens", 0)
                     usage["output_tokens"] = resp_usage.get("completion_tokens", 0)
                     if usage["input_tokens"] == 0 and usage["output_tokens"] == 0:
-                        _llm_log.warning("[OpenAI Compatible] 警告: usage字段存在但token计数为0")
+                        logger.warning("[OpenAI Compatible] usage字段存在但 token 计数为 0")
                 else:
-                    _llm_log.warning("[OpenAI Compatible] 警告: API响应中没有usage字段")
+                    logger.warning("[OpenAI Compatible] API响应中没有 usage 字段")
 
                 return {
                     "content": content,
@@ -314,10 +329,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 }
             except Exception as e:
                 last_error = e
-                _llm_log.error(f"[OpenAI Compatible] 请求异常: {e}, 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                logger.warning("[OpenAI Compatible] 请求异常: %s, 尝试次数: %s/%s", e, attempt + 1, self.max_retries + 1)
                 if attempt < self.max_retries:
                     delay = self._calculate_retry_delay(attempt)
-                    _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                    logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                     time.sleep(delay)
                     continue
 
@@ -347,10 +362,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         url, headers=headers, json=body, stream=True, timeout=120.0
                     )
                     if self._is_rate_limited(response):
-                        _llm_log.warning(f"[OpenAI Compatible] 流式请求收到 429 状态码 (速率限制), 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                        logger.warning("[OpenAI Compatible] 流式请求收到 429 状态码, 尝试次数: %s/%s", attempt + 1, self.max_retries + 1)
                         if attempt < self.max_retries:
                             delay = self._calculate_retry_delay(attempt, dict(response.headers))
-                            _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                            logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                             time.sleep(delay)
                             continue
                         else:
@@ -380,10 +395,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                             "POST", url, headers=headers, json=body
                         ) as resp:
                             if self._is_rate_limited(resp):
-                                _llm_log.warning(f"[OpenAI Compatible] 流式请求收到 429 状态码 (速率限制), 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                                logger.warning("[OpenAI Compatible] 流式请求收到 429 状态码, 尝试次数: %s/%s", attempt + 1, self.max_retries + 1)
                                 if attempt < self.max_retries:
                                     delay = self._calculate_retry_delay(attempt, dict(resp.headers))
-                                    _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                                    logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                                     time.sleep(delay)
                                     continue
                                 else:
@@ -409,10 +424,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     return
             except Exception as e:
                 last_error = e
-                _llm_log.error(f"[OpenAI Compatible] 流式请求异常: {e}, 尝试次数: {attempt + 1}/{self.max_retries + 1}")
+                logger.warning("[OpenAI Compatible] 流式请求异常: %s, 尝试次数: %s/%s", e, attempt + 1, self.max_retries + 1)
                 if attempt < self.max_retries:
                     delay = self._calculate_retry_delay(attempt)
-                    _llm_log.debug(f"[OpenAI Compatible] 等待 {delay} 秒后重试...")
+                    logger.info("[OpenAI Compatible] 等待 %s 秒后重试...", delay)
                     time.sleep(delay)
                     continue
 
@@ -465,6 +480,7 @@ class APIConfig:
     base_url: str = ""
     api_key: str = ""
     model_name: str = ""
+    api_key_env: str = ""
 
 
 def get_provider(api_config: APIConfig) -> BaseLLMProvider:

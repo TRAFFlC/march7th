@@ -47,7 +47,7 @@ class ProfileSummaryManager:
             return None
         
         conv_texts = []
-        for conv in conversations[-20:]:
+        for conv in conversations[:20]:
             conv_texts.append(f"用户: {conv['user_input']}")
             conv_texts.append(f"助手: {conv['bot_reply']}")
         
@@ -111,7 +111,9 @@ class ProfileSummaryManager:
 
     def update_profile_summary(self, user_id: int) -> Optional[str]:
         db = get_db()
-        
+
+        get_or_create_user_profile(db, user_id)
+
         summary = self.generate_profile_summary(user_id)
         if not summary:
             return None

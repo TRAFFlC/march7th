@@ -3,8 +3,8 @@
 Database Management Module - MySQL Version
 """
 
-import os
 import re
+import logging
 import pymysql
 from pymysql.cursors import DictCursor
 from datetime import datetime
@@ -12,14 +12,10 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import bcrypt
 
-try:
-    from dbutils.pooled_db import PooledDB
-    _HAS_POOL = True
-except ImportError:
-    PooledDB = None
-    _HAS_POOL = False
+from personal_config import MYSQL_CONFIG, ADMIN_CONFIG
 
-from personal_config import MYSQL_CONFIG
+
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -39,51 +35,16 @@ class DatabaseManager:
     def __init__(self, config: dict = None):
         self.config = config or MYSQL_CONFIG
         self._create_database_if_not_exists()
-        if _HAS_POOL:
-            try:
-                self._pool = PooledDB(
-                    creator=pymysql,
-                    maxconnections=10,
-                    mincached=2,
-                    maxcached=5,
-                    blocking=True,
-                    maxusage=0,
-                    setsession=[],
-                    ping=1,
-                    host=self.config['host'],
-                    port=self.config['port'],
-                    user=self.config['user'],
-                    password=self.config['password'],
-                    database=self.config['database'],
-                    charset=self.config.get('charset', 'utf8mb4'),
-                    cursorclass=DictCursor,
-                    autocommit=False,
-                )
-                self.connection = self._pool.connection()
-            except Exception:
-                self._pool = None
-                self.connection = pymysql.connect(
-                    host=self.config['host'],
-                    port=self.config['port'],
-                    user=self.config['user'],
-                    password=self.config['password'],
-                    database=self.config['database'],
-                    charset=self.config.get('charset', 'utf8mb4'),
-                    cursorclass=DictCursor,
-                    autocommit=False
-                )
-        else:
-            self._pool = None
-            self.connection = pymysql.connect(
-                host=self.config['host'],
-                port=self.config['port'],
-                user=self.config['user'],
-                password=self.config['password'],
-                database=self.config['database'],
-                charset=self.config.get('charset', 'utf8mb4'),
-                cursorclass=DictCursor,
-                autocommit=False
-            )
+        self.connection = pymysql.connect(
+            host=self.config['host'],
+            port=self.config['port'],
+            user=self.config['user'],
+            password=self.config['password'],
+            database=self.config['database'],
+            charset=self.config.get('charset', 'utf8mb4'),
+            cursorclass=DictCursor,
+            autocommit=False
+        )
         self.create_tables()
         self._create_default_admin()
     
@@ -114,8 +75,10 @@ class DatabaseManager:
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     username VARCHAR(100) UNIQUE NOT NULL,
                     password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(20) DEFAULT 'user',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_username (username)
+                    INDEX idx_username (username),
+                    INDEX idx_role (role)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ''')
             
@@ -203,20 +166,20 @@ class DatabaseManager:
 
             cursor.execute("SHOW COLUMNS FROM user_characters LIKE 'source_id'")
             if not cursor.fetchone():
-                print("[DB] 添加 user_characters.source_id 列...")
+                logger.info("[DB] 添加 user_characters.source_id 列...")
                 cursor.execute('ALTER TABLE user_characters ADD COLUMN source_id VARCHAR(100)')
                 cursor.execute('ALTER TABLE user_characters ADD INDEX idx_source_id (source_id)')
-                print("[DB] user_characters.source_id 列添加成功")
+                logger.info("[DB] user_characters.source_id 列添加成功")
             
             cursor.execute("SHOW COLUMNS FROM user_preferences LIKE 'last_updated'")
             if not cursor.fetchone():
-                print("[DB] 添加 user_preferences.last_updated 列...")
+                logger.info("[DB] 添加 user_preferences.last_updated 列...")
                 cursor.execute('''
                     ALTER TABLE user_preferences 
                     ADD COLUMN last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ''')
                 cursor.execute('ALTER TABLE user_preferences ADD INDEX idx_last_updated (last_updated)')
-                print("[DB] user_preferences.last_updated 列添加成功")
+                logger.info("[DB] user_preferences.last_updated 列添加成功")
             
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS feedback_details (
@@ -321,25 +284,38 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ''')
 
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS community_characters (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    character_id VARCHAR(100) NOT NULL,
+                    character_data JSON NOT NULL,
+                    description TEXT,
+                    download_count INT DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    INDEX idx_user_id (user_id),
+                    INDEX idx_character_id (character_id),
+                    INDEX idx_download_count (download_count),
+                    INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+
             self.connection.commit()
     
     def _create_default_admin(self):
         with self.connection.cursor() as cursor:
-            from personal_config import ADMIN_CONFIG
-            username = ADMIN_CONFIG.get("default_username", "admin")
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            cursor.execute("SELECT id FROM users WHERE username = %s", (ADMIN_CONFIG['default_username'],))
             if not cursor.fetchone():
-                password = ADMIN_CONFIG.get("default_password", "")
-                password_hash = hash_password(password)
+                password_hash = hash_password(ADMIN_CONFIG['default_password'])
                 cursor.execute(
-                    "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-                    (username, password_hash)
+                    "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s)",
+                    (ADMIN_CONFIG['default_username'], password_hash, 'admin')
                 )
                 self.connection.commit()
     
     @contextmanager
     def get_cursor(self):
-        self._ensure_connection()
         cursor = self.connection.cursor()
         try:
             yield cursor
@@ -350,65 +326,29 @@ class DatabaseManager:
 
     def get_connection(self):
         return self.connection
-
-    def get_pooled_connection(self):
-        if self._pool:
-            return self._pool.connection()
-        return self.connection
-
-    def _ensure_connection(self):
-        try:
-            self.connection.ping(reconnect=True)
-        except Exception:
-            if self._pool:
-                self.connection = self._pool.connection()
-            else:
-                self.connection = pymysql.connect(
-                    host=self.config['host'],
-                    port=self.config['port'],
-                    user=self.config['user'],
-                    password=self.config['password'],
-                    database=self.config['database'],
-                    charset=self.config.get('charset', 'utf8mb4'),
-                    cursorclass=DictCursor,
-                    autocommit=False
-                )
     
     def close(self):
         if self.connection:
             self.connection.close()
 
 
-def create_user(db: DatabaseManager, username: str, password: str) -> Optional[int]:
+def create_user(db: DatabaseManager, username: str, password: str, role: str = 'user') -> Optional[int]:
     password_hash = hash_password(password)
     try:
         with db.get_cursor() as cursor:
             cursor.execute(
-                "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-                (username, password_hash)
+                "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s)",
+                (username, password_hash, role)
             )
             return cursor.lastrowid
     except pymysql.IntegrityError:
         return None
 
 
-def get_user_by_username(db: DatabaseManager, username: str) -> Optional[Dict[str, Any]]:
-    with db.get_cursor() as cursor:
-        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-        return cursor.fetchone()
-
-
 def get_user_by_id(db: DatabaseManager, user_id: int) -> Optional[Dict[str, Any]]:
     with db.get_cursor() as cursor:
         cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
         return cursor.fetchone()
-
-
-def verify_user(db: DatabaseManager, username: str, password: str) -> Optional[Dict[str, Any]]:
-    user = get_user_by_username(db, username)
-    if user and verify_password(password, user['password_hash']):
-        return user
-    return None
 
 
 def save_conversation(db: DatabaseManager, user_id: int, character: str, 
@@ -681,13 +621,6 @@ def get_conversation_trend(
 _db_instance: Optional[DatabaseManager] = None
 
 
-def get_db() -> DatabaseManager:
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = DatabaseManager()
-    return _db_instance
-
-
 def close_db():
     global _db_instance
     if _db_instance:
@@ -719,7 +652,7 @@ def update_user_profile_info(db: DatabaseManager, user_id: int, nickname: str = 
 def get_user_profile_info(db: DatabaseManager, user_id: int) -> Optional[Dict[str, Any]]:
     with db.get_cursor() as cursor:
         cursor.execute(
-            "SELECT id, username, nickname, avatar, created_at FROM users WHERE id = %s",
+            "SELECT id, username, nickname, avatar, role, created_at FROM users WHERE id = %s",
             (user_id,)
         )
         return cursor.fetchone()
@@ -1195,6 +1128,55 @@ def clear_llm_test_conversations(db: DatabaseManager, user_id: int = None) -> in
         return cursor.rowcount
 
 
+def update_user_role(db: DatabaseManager, user_id: int, new_role: str) -> bool:
+    if new_role not in ('user', 'admin'):
+        return False
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "UPDATE users SET role = %s WHERE id = %s",
+                (new_role, user_id)
+            )
+            return cursor.rowcount > 0
+    except Exception:
+        return False
+
+
+def delete_user(db: DatabaseManager, user_id: int) -> bool:
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("DELETE FROM user_preferences WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM conversations WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+            return cursor.rowcount > 0
+    except Exception:
+        return False
+
+
+def get_conversations_by_role(db: DatabaseManager, role: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        if role and role != 'all':
+            cursor.execute(
+                """SELECT c.*, u.username, u.role 
+                   FROM conversations c 
+                   JOIN users u ON c.user_id = u.id 
+                   WHERE u.role = %s
+                   ORDER BY c.timestamp DESC 
+                   LIMIT %s""",
+                (role, limit)
+            )
+        else:
+            cursor.execute(
+                """SELECT c.*, u.username, u.role 
+                   FROM conversations c 
+                   JOIN users u ON c.user_id = u.id 
+                   ORDER BY c.timestamp DESC 
+                   LIMIT %s""",
+                (limit,)
+            )
+        return cursor.fetchall()
+
+
 def get_conversation_by_user(db: DatabaseManager, conversation_id: int, user_id: int) -> Optional[Dict[str, Any]]:
     with db.get_cursor() as cursor:
         cursor.execute(
@@ -1208,7 +1190,7 @@ def get_conversation_by_user(db: DatabaseManager, conversation_id: int, user_id:
 def get_conversations_by_user(db: DatabaseManager, user_id: int, limit: int = 100) -> List[Dict[str, Any]]:
     with db.get_cursor() as cursor:
         cursor.execute(
-            """SELECT c.*, u.username
+            """SELECT c.*, u.username, u.role
                FROM conversations c
                JOIN users u ON c.user_id = u.id
                WHERE c.user_id = %s
@@ -1406,3 +1388,92 @@ def save_settings(db: DatabaseManager, settings: dict) -> bool:
         return False
 
 
+def get_all_users(db: DatabaseManager) -> List[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        cursor.execute(
+            """SELECT id, username, role, created_at FROM users ORDER BY created_at DESC"""
+        )
+        return cursor.fetchall()
+
+
+def publish_character_to_community(db: DatabaseManager, user_id: int, character_id: str, 
+                                    character_data: dict, description: str = None) -> Optional[int]:
+    import json
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                """SELECT id FROM community_characters WHERE user_id = %s AND character_id = %s""",
+                (user_id, character_id)
+            )
+            if cursor.fetchone():
+                return None
+            
+            cursor.execute(
+                """INSERT INTO community_characters (user_id, character_id, character_data, description) 
+                   VALUES (%s, %s, %s, %s)""",
+                (user_id, character_id, json.dumps(character_data, ensure_ascii=False), description)
+            )
+            return cursor.lastrowid
+    except Exception as e:
+        print(f"发布角色到社区失败: {e}")
+        return None
+
+
+def get_community_characters(db: DatabaseManager, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        cursor.execute(
+            """SELECT cc.*, u.username, u.avatar as user_avatar
+               FROM community_characters cc
+               JOIN users u ON cc.user_id = u.id
+               ORDER BY cc.download_count DESC, cc.created_at DESC
+               LIMIT %s OFFSET %s""",
+            (limit, offset)
+        )
+        return cursor.fetchall()
+
+
+def get_community_character(db: DatabaseManager, character_id: int) -> Optional[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        cursor.execute(
+            """SELECT cc.*, u.username, u.avatar as user_avatar
+               FROM community_characters cc
+               JOIN users u ON cc.user_id = u.id
+               WHERE cc.id = %s""",
+            (character_id,)
+        )
+        return cursor.fetchone()
+
+
+def increment_download_count(db: DatabaseManager, character_id: int) -> bool:
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "UPDATE community_characters SET download_count = download_count + 1 WHERE id = %s",
+                (character_id,)
+            )
+            return True
+    except Exception as e:
+        print(f"更新下载计数失败: {e}")
+        return False
+
+
+def unpublish_character_from_community(db: DatabaseManager, user_id: int, character_id: str) -> bool:
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM community_characters WHERE user_id = %s AND character_id = %s",
+                (user_id, character_id)
+            )
+            return cursor.rowcount > 0
+    except Exception as e:
+        print(f"取消发布角色失败: {e}")
+        return False
+
+
+def is_character_published(db: DatabaseManager, user_id: int, character_id: str) -> bool:
+    with db.get_cursor() as cursor:
+        cursor.execute(
+            "SELECT id FROM community_characters WHERE user_id = %s AND character_id = %s",
+            (user_id, character_id)
+        )
+        return cursor.fetchone() is not None
