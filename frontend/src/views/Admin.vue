@@ -49,6 +49,14 @@
               <option value="admin">管理员</option>
             </select>
           </div>
+          <div class="filter-group">
+            <label>评分筛选:</label>
+            <select v-model="ratingFilter" class="input-field">
+              <option value="all">全部</option>
+              <option value="rated">已评分</option>
+              <option value="unrated">待评分</option>
+            </select>
+          </div>
           <div class="search-group">
             <input
               v-model="searchKeyword"
@@ -64,9 +72,63 @@
               清除
             </button>
           </div>
-          <button class="btn btn-secondary" @click="loadConversations">
+          <button class="btn btn-secondary" @click="loadConversations(); loadSuggestionLoopStats()">
             🔄 刷新
           </button>
+        </div>
+
+        <div class="stats-cards">
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_biu.png" class="emoji-icon" />
+              <span class="stat-title">自动生成建议</span>
+            </div>
+            <div class="stat-value">{{ suggestionLoopStats?.auto_generated ?? 0 }}</div>
+            <div class="stat-desc">系统自动检测生成（全局）</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_吃糖.png" class="emoji-icon" />
+              <span class="stat-title">待确认建议</span>
+            </div>
+            <div class="stat-value warning">{{ suggestionLoopStats?.auto_pending ?? 0 }}</div>
+            <div class="stat-desc">等待人工确认入库</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_点赞.png" class="emoji-icon" />
+              <span class="stat-title">已确认建议</span>
+            </div>
+            <div class="stat-value positive">{{ suggestionLoopStats?.auto_confirmed ?? 0 }}</div>
+            <div class="stat-desc">确认后写入 RAG 知识库</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_暗中观察.png" class="emoji-icon" />
+              <span class="stat-title">已驳回建议</span>
+            </div>
+            <div class="stat-value">{{ suggestionLoopStats?.auto_rejected ?? 0 }}</div>
+            <div class="stat-desc">驳回后不写入 RAG</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_骄傲.png" class="emoji-icon" />
+              <span class="stat-title">确认闭环率</span>
+            </div>
+            <div class="stat-value accent">{{ confirmRateText }}</div>
+            <div class="stat-desc">已确认 / 已处理建议</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <img src="/emojis/三月七_开心.png" class="emoji-icon" />
+              <span class="stat-title">RAG 累计更新数</span>
+            </div>
+            <div class="stat-value positive">{{ suggestionLoopStats?.rag_updated_total ?? 0 }}</div>
+            <div class="stat-desc">反馈确认后累计写入 RAG</div>
+          </div>
+        </div>
+        <div class="loop-pipeline-hint">
+          建议闭环：对话 → 自动检测生成建议 → 人工确认写入 RAG / 驳回拦截 → 画像优化
         </div>
 
         <div v-if="searchResults.length > 0" class="search-results-info">
@@ -89,7 +151,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="conv in (searchResults.length > 0 ? searchResults : conversations)" :key="conv.id">
+              <tr v-for="conv in displayedConversations" :key="conv.id">
                 <td>{{ conv.id }}</td>
                 <td>{{ conv.username }}</td>
                 <td>{{ conv.role === 'admin' ? '管理员' : '用户' }}</td>
@@ -630,6 +692,7 @@ const conversations = ref([])
 const users = ref([])
 const userCharacters = ref([])
 const roleFilter = ref('all')
+const ratingFilter = ref('all')
 const debugInfo = ref(null)
 const editingCharacter = ref(null)
 const viewingCharacter = ref(null)
@@ -649,6 +712,28 @@ const searchKeyword = ref('')
 const searchResults = ref([])
 const searching = ref(false)
 
+// 建议闭环统计（数据源: /api/rag/suggestions/stats?scope=all，管理员全局口径）
+// 五项指标: 自动生成 / 待确认 / 已确认 / 已驳回 / 确认闭环率
+const suggestionLoopStats = ref(null)
+
+const confirmRateText = computed(() => {
+  const rate = suggestionLoopStats.value?.confirm_rate
+  if (rate === null || rate === undefined) return '—'
+  return `${(rate * 100).toFixed(1)}%`
+})
+
+// 表格展示的对话：搜索结果优先，并按评分筛选（已评分/待评分）本地过滤
+const displayedConversations = computed(() => {
+  const list = searchResults.value.length > 0 ? searchResults.value : conversations.value
+  if (ratingFilter.value === 'rated') {
+    return list.filter(c => c.rating != null && c.rating !== undefined)
+  }
+  if (ratingFilter.value === 'unrated') {
+    return list.filter(c => c.rating == null || c.rating === undefined)
+  }
+  return list
+})
+
 const settings = ref({
   securityFilterEnabled: true,
   proxyEnabled: false,
@@ -660,11 +745,23 @@ const settingsMessageType = ref('success')
 
 onMounted(() => {
   loadConversations()
+  loadSuggestionLoopStats()
   loadUsers()
   loadUserCharacters()
   loadDebugInfo()
   loadSettings()
 })
+
+async function loadSuggestionLoopStats() {
+  try {
+    const response = await api.get('/rag/suggestions/stats', { scope: 'all' })
+    if (response.success) {
+      suggestionLoopStats.value = response.stats || null
+    }
+  } catch (e) {
+    console.error('Failed to load suggestion loop stats:', e)
+  }
+}
 
 async function loadConversations() {
   try {
@@ -1162,6 +1259,69 @@ function formatTime(timestamp) {
   border-radius: 8px;
   font-size: 14px;
   color: var(--accent-secondary);
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary);
+}
+
+.stat-value.accent {
+  color: var(--accent-secondary);
+}
+
+.stat-value.positive {
+  color: #4caf50;
+}
+
+.stat-value.warning {
+  color: #ff9800;
+}
+
+.stat-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.loop-pipeline-hint {
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: rgba(66, 133, 244, 0.08);
+  border: 1px solid rgba(66, 133, 244, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .data-table {

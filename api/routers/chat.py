@@ -5,8 +5,9 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 from datetime import datetime, UTC
-from typing import Optional, AsyncGenerator
+from typing import Dict, Optional, Tuple, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -31,6 +32,228 @@ from ..schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# 自动画像一致性检测（反馈闭环自动生效）
+# 节流：每用户每角色每 N 轮对话检测一次（AUTO_CONSISTENCY_INTERVAL，默认 3 轮）
+# ---------------------------------------------------------------------------
+_consistency_turn_counters: Dict[Tuple[int, str], int] = {}
+_consistency_counters_lock = threading.Lock()
+
+
+def _should_run_consistency_check(user_id: int, character_id: Optional[str]) -> bool:
+    import config as app_config
+
+    if not character_id:
+        return False
+
+    interval = max(1, getattr(app_config, "AUTO_CONSISTENCY_INTERVAL", 3))
+    key = (user_id, character_id)
+    with _consistency_counters_lock:
+        _consistency_turn_counters[key] = _consistency_turn_counters.get(key, 0) + 1
+        return _consistency_turn_counters[key] % interval == 0
+
+
+def _build_consistency_history(session_id, exclude_conversation_id: int, limit: int = 6) -> list:
+    """从数据库取该会话最近几轮对话（不含当前轮）作为检测上下文。"""
+    from database import get_db, get_session_conversations
+
+    if not session_id:
+        return []
+
+    try:
+        db = get_db()
+        conversations = get_session_conversations(db, session_id)
+    except Exception:
+        return []
+
+    history = []
+    for conv in reversed(conversations):
+        if conv.get('id') == exclude_conversation_id:
+            continue
+        history.append({"role": "user", "content": conv.get('user_input', '')})
+        history.append({"role": "assistant", "content": conv.get('bot_reply', '')})
+        if len(history) >= limit:
+            break
+    return history[:limit]
+
+
+def _run_persona_consistency_check_sync(conversation_id: int, user_id: int, character_id: Optional[str]):
+    """同步执行的画像一致性检测（在后台线程中运行，不阻塞对话返回）。"""
+    from database import (
+        get_db,
+        get_conversation_by_id,
+        get_settings,
+        save_feedback_detail,
+    )
+    from character_config import CharacterConfigManager
+    from rag_iteration import RAGIterationManager, get_iteration_api_config
+    from llm_provider import get_provider
+    import config as app_config
+
+    try:
+        db = get_db()
+        conv = get_conversation_by_id(db, conversation_id)
+        if not conv or conv.get('user_id') != user_id:
+            return
+
+        char = CharacterConfigManager().get_character(conv.get('character', ''))
+        if char is None:
+            logger.info("[AutoConsistency] 未找到角色配置，跳过自动检测")
+            return
+
+        api_configs = get_iteration_api_config(char)
+        if not api_configs:
+            # 与现有迭代修正的 API 校验规则一致：未配置独立 API（或仅 ollama）时跳过，不报错
+            logger.info("[AutoConsistency] 角色未配置可用的 iteration API，跳过自动检测")
+            return
+
+        character_info = char.llm_config.system_prompt
+        user_input = conv.get('user_input', '')
+        bot_reply = conv.get('bot_reply', '')
+        history = _build_consistency_history(
+            conv.get('session_id'), conversation_id)
+
+        providers = [get_provider(c) for c in api_configs]
+        iteration_manager = RAGIterationManager(llm_providers=providers)
+
+        result = iteration_manager.process_feedback(
+            feedback_type="persona_consistency",
+            conversation_data={
+                "user_input": user_input,
+                "bot_reply": bot_reply,
+                "model_name": conv.get('character', ''),
+            },
+            character_info=character_info,
+            conversation_history=history,
+        )
+
+        if not isinstance(result, dict) or result.get("error") or result.get("parse_error"):
+            logger.info("[AutoConsistency] 检测未得到有效结果，跳过: %s",
+                        (result or {}).get("error", "parse_error") if isinstance(result, dict) else result)
+            return
+
+        if result.get("is_consistent", True):
+            # 检测认为符合画像：不生成待确认建议，仅记录统计（日志）
+            logger.info("[AutoConsistency] 检测结论：符合画像 (confidence=%s)，不生成待确认建议",
+                        result.get("confidence"))
+            return
+
+        confidence = result.get("confidence", 0.5)
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.5
+
+        suggestion_payload = {
+            "is_consistent": False,
+            "deviation": result.get("deviation", ""),
+            "suggestion": result.get("suggestion", ""),
+            "confidence": confidence,
+        }
+
+        # 先保存待确认建议（origin=auto，永不直接写 RAG）
+        feedback_id = save_feedback_detail(
+            db,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            feedback_type="persona_consistency",
+            context_snapshot={
+                "user_input": user_input,
+                "bot_reply": bot_reply,
+                "model_name": conv.get('character', ''),
+            },
+            correction_suggestion=json.dumps(
+                suggestion_payload, ensure_ascii=False),
+            model_name=conv.get('character', ''),
+            origin='auto',
+            confidence=confidence,
+            suggestion_status='pending',
+        )
+
+        if not feedback_id:
+            logger.warning("[AutoConsistency] 待确认建议保存失败")
+            return
+
+        logger.info(
+            "[AutoConsistency] 已生成待确认建议 #%s (confidence=%.2f)",
+            feedback_id, confidence)
+
+        # 弱权重自动写入（实验开关，默认关闭）：confidence ≥ 0.85 时写入 trust = confidence × 0.5 的条目
+        try:
+            settings = get_settings(db)
+        except Exception:
+            settings = {}
+        weak_write_enabled = settings.get(
+            "autoWeakWriteEnabled",
+            getattr(app_config, "AUTO_WEAK_WRITE_ENABLED", False),
+        )
+        weak_threshold = getattr(
+            app_config, "AUTO_WEAK_WRITE_CONFIDENCE_THRESHOLD", 0.85)
+        weak_trust_factor = getattr(
+            app_config, "AUTO_WEAK_WRITE_TRUST_FACTOR", 0.5)
+
+        if weak_write_enabled and confidence >= weak_threshold:
+            try:
+                from persona_manager import get_persona_manager
+                from database import (
+                    update_feedback_suggestion_json,
+                    update_feedback_rag_status,
+                )
+
+                knowledge_content = (
+                    f"画像修正: {suggestion_payload['deviation']} - {suggestion_payload['suggestion']}"
+                    if suggestion_payload['deviation'] or suggestion_payload['suggestion']
+                    else None
+                )
+                if knowledge_content:
+                    entry_id = get_persona_manager().add_knowledge_entry(
+                        content=knowledge_content,
+                        metadata={
+                            "source": "feedback",
+                            "origin": "auto",
+                            "trust": confidence * weak_trust_factor,
+                            "confidence": confidence,
+                            "feedback_id": feedback_id,
+                            "feedback_type": "persona_consistency",
+                        },
+                    )
+                    if entry_id is not None:
+                        suggestion_payload["auto_written"] = True
+                        suggestion_payload["auto_written_trust"] = round(
+                            confidence * weak_trust_factor, 4)
+                        update_feedback_suggestion_json(
+                            db, feedback_id,
+                            json.dumps(suggestion_payload, ensure_ascii=False))
+                        update_feedback_rag_status(db, feedback_id, True)
+                        logger.info(
+                            "[AutoConsistency] 弱权重自动写入 RAG (trust=%.2f, confidence=%.2f)",
+                            confidence * weak_trust_factor, confidence)
+                    else:
+                        logger.info("[AutoConsistency] 弱权重写入被去重跳过")
+            except Exception as e:
+                logger.warning("[AutoConsistency] 弱权重自动写入失败: %s", e)
+    except Exception as e:
+        logger.warning("[AutoConsistency] 画像一致性检测异常: %s", e)
+
+
+def _schedule_persona_consistency_check(conversation_id: Optional[int],
+                                        user_id: int,
+                                        character_id: Optional[str]):
+    """对话完成后异步触发一致性检测（后台线程，不阻塞对话返回）。"""
+    if not conversation_id:
+        return
+    if not _should_run_consistency_check(user_id, character_id):
+        return
+
+    thread = threading.Thread(
+        target=_run_persona_consistency_check_sync,
+        args=(conversation_id, user_id, character_id),
+        daemon=True,
+        name=f"persona-consistency-{conversation_id}",
+    )
+    thread.start()
+    logger.info("[AutoConsistency] 已调度画像一致性检测 (conversation_id=%s)", conversation_id)
 
 
 @router.post("/api/chat")
@@ -102,6 +325,13 @@ async def chat(data: ChatRequest, request: Request, response: Response, user: di
                            message_count=session.get('message_count', 0) + 1 if session else 1)
 
         set_last_debug_info(debug_info)
+
+        # 对话完成后异步触发画像一致性检测（不阻塞对话返回）
+        _schedule_persona_consistency_check(
+            conversation_id,
+            user['user_id'],
+            data.character_id or controller.get_current_character_id(),
+        )
 
         rag_info = debug_info.get("rag", {})
 
@@ -200,6 +430,13 @@ async def voice_input(data: VoiceInputRequest, user: dict = Depends(get_current_
                            message_count=session.get('message_count', 0) + 1 if session else 1)
 
         set_last_debug_info(debug_info)
+
+        # 对话完成后异步触发画像一致性检测（不阻塞对话返回）
+        _schedule_persona_consistency_check(
+            conversation_id,
+            user['user_id'],
+            actual_character_id,
+        )
 
         rag_info = debug_info.get("rag", {})
 
@@ -302,6 +539,12 @@ async def stream_chat_response(
                     update_session(db, actual_session_id,
                                    last_message_at=datetime.now(UTC),
                                    message_count=session.get('message_count', 0) + 1 if session else 1)
+                # 对话完成后异步触发画像一致性检测（不阻塞流式返回）
+                _schedule_persona_consistency_check(
+                    event.get("conversation_id"),
+                    user_id,
+                    character_id or controller.get_current_character_id(),
+                )
                 data = json.dumps({
                     "conversation_id": event.get("conversation_id"),
                     "session_id": actual_session_id,

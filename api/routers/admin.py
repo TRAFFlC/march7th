@@ -438,6 +438,7 @@ async def get_debug_info(user: dict = Depends(get_admin_user)):
 @router.get("/api/admin/settings")
 async def get_admin_settings(admin: dict = Depends(get_admin_user)):
     from database import get_db, get_settings
+    import config as app_config
     db = get_db()
     saved = get_settings(db)
     return {
@@ -447,6 +448,7 @@ async def get_admin_settings(admin: dict = Depends(get_admin_user)):
             "proxyEnabled": saved.get("proxyEnabled", False),
             "proxyUrl": saved.get("proxyUrl", ""),
             "verboseLogging": saved.get("verboseLogging", False),
+            "autoWeakWriteEnabled": saved.get("autoWeakWriteEnabled", getattr(app_config, "AUTO_WEAK_WRITE_ENABLED", False)),
         }
     }
 
@@ -468,6 +470,7 @@ async def update_admin_settings(settings: dict, admin: dict = Depends(get_admin_
             "proxyEnabled": settings.get("proxyEnabled", False),
             "proxyUrl": settings.get("proxyUrl", ""),
             "verboseLogging": settings.get("verboseLogging", False),
+            "autoWeakWriteEnabled": settings.get("autoWeakWriteEnabled", False),
         }
     }
 

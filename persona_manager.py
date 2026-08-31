@@ -117,34 +117,87 @@ class PersonaManager:
 
         return embedding_id
 
-    def add_knowledge_entry(self, content: str, metadata: dict = None) -> str:
+    def add_knowledge_entry(self, content: str, metadata: dict = None) -> Optional[str]:
+        """写入知识条目（带信任元数据与写入去重）。
+
+        - metadata 支持 source（feedback/manual/preference）、origin（user/auto）、trust（0~1）、confidence（0~1）
+        - 写入前对现有集合做向量相似度检索，最高相似度 ≥ RAG_WRITE_DEDUP_THRESHOLD 时跳过写入
+        - 返回新条目 id；去重跳过时返回 None
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
         self.load_persona_db()
-        entry_id = f"kb_{uuid.uuid4().hex[:12]}"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         embedding = self.embedding_model.encode([content])
-        
+
+        dedup_threshold = getattr(
+            config, "RAG_WRITE_DEDUP_THRESHOLD", 0.92)
+
+        try:
+            existing = self.collection.query(
+                query_embeddings=embedding.tolist(),
+                n_results=1,
+                include=["documents", "distances"]
+            )
+            if existing and existing.get("distances") and existing["distances"][0]:
+                distance = existing["distances"][0][0]
+                similarity = 1 - distance
+                if similarity >= dedup_threshold:
+                    existing_doc = (existing.get("documents") or [[""]])[0][0]
+                    logger.info(
+                        "[PersonaManager] 写入去重：新条目与现有条目相似度 %.4f ≥ %.2f，跳过写入（相似条目: %s...）",
+                        similarity, dedup_threshold, existing_doc[:50]
+                    )
+                    return None
+        except Exception as e:
+            logger.warning("[PersonaManager] 写入去重检索失败，继续写入: %s", e)
+
+        entry_id = f"kb_{uuid.uuid4().hex[:12]}"
+
+        origin = (metadata or {}).get("origin", "user")
+        confidence = (metadata or {}).get("confidence", 1.0)
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = 1.0
+        trust = (metadata or {}).get("trust", 1.0)
+        try:
+            trust = max(0.0, min(1.0, float(trust)))
+        except (TypeError, ValueError):
+            trust = 1.0
+
         entry_metadata = {
             "record_id": entry_id,
             "rating": metadata.get("rating", 5) if metadata else 5,
             "reason": metadata.get("reason", "") if metadata else "",
             "usage_count": 0,
             "timestamp": timestamp,
+            "created_at": timestamp,
             "source": metadata.get("source", "manual") if metadata else "manual",
+            "origin": origin,
+            "trust": trust,
+            "confidence": confidence,
         }
-        
+
         if metadata:
-            for key in ["feedback_id", "feedback_type", "user_input"]:
+            for key in ["feedback_id", "feedback_type", "user_input", "confirmed_by"]:
                 if key in metadata:
                     entry_metadata[key] = metadata[key]
-        
+
         self.collection.add(
             ids=[entry_id],
             embeddings=embedding.tolist(),
             documents=[content],
             metadatas=[entry_metadata]
         )
-        
+
+        logger.info(
+            "[PersonaManager] 新增知识条目 %s (source=%s, origin=%s, trust=%.2f, confidence=%.2f)",
+            entry_id, entry_metadata["source"], origin, trust, confidence
+        )
+
         return entry_id
 
     def _update_record_embedding_id(self, record_id: str, embedding_id: str):

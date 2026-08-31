@@ -58,6 +58,7 @@
     
     document.body.addEventListener('mousedown', (e) => {
       e.preventDefault();
+      markInteraction();
       isDragging = true;
       clickStartTime = Date.now();
       dragOffset = {
@@ -298,6 +299,7 @@
 
     voiceManager.onSpeechResult = async (text) => {
       console.log('[Pet] 处理语音结果:', text);
+      markInteraction();
       showVoiceBubble('💬 你说: ' + text);
       loadPetImage('thinking');
       
@@ -351,12 +353,18 @@
 
     petAPI.onVoiceBubble((data) => {
       console.log('[Pet] 收到 voice-bubble 事件:', typeof data === 'object' ? 'object' : 'string');
+      markInteraction();
       if (typeof data === 'object' && data.text) {
         showVoiceBubble(data.text);
         loadPetImage('happy');
         if (data.audio && !data.chatWindowVisible) {
-          console.log('[Pet] voice-bubble 包含音频数据，聊天窗口不可见，播放音频');
-          playAudio(data.audio);
+          // Task 11.3: 静音时段内不自动播放 TTS，仅显示文字气泡
+          if (isQuietHours()) {
+            console.log('[Pet] 当前处于静音时段，跳过桌宠语音播放');
+          } else {
+            console.log('[Pet] voice-bubble 包含音频数据，聊天窗口不可见，播放音频');
+            playAudio(data.audio);
+          }
         } else if (data.chatWindowVisible) {
           console.log('[Pet] 聊天窗口可见，跳过桌宠音频播放');
         }
@@ -394,6 +402,8 @@
         currentAudio.addEventListener('ended', () => {
           console.log('[Pet] 音频播放结束');
           currentAudio = null;
+          // Task 11.6: 播放结束后桌宠表情回退 neutral
+          loadPetImage('normal');
         });
         
         currentAudio.addEventListener('error', (e) => {
@@ -419,20 +429,20 @@
     }
 
     let bubbleTimeout = null;
-    function showVoiceBubble(text, keepShowing = false) {
+    function showVoiceBubble(text, keepShowing = false, duration = 5000) {
       if (bubbleTimeout) {
         clearTimeout(bubbleTimeout);
         bubbleTimeout = null;
       }
-      
+
       voiceBubbleText.textContent = text.length > 50 ? text.substring(0, 50) + '...' : text;
       voiceBubble.style.display = 'block';
-      
+
       if (!keepShowing) {
         bubbleTimeout = setTimeout(() => {
           voiceBubble.style.display = 'none';
           bubbleTimeout = null;
-        }, 5000);
+        }, duration);
       }
     }
 
@@ -460,8 +470,8 @@
         neutral: 'normal',
         happy: 'happy',
         confused: 'thinking',
-        sad: 'normal',
-        angry: 'normal',
+        sad: 'sad',        // Task 11.6: sad/angry 映射到差异化表情图
+        angry: 'angry',
         excited: 'surprised'
       };
       const imageType = emotionImageMap[emotion] || 'normal';
@@ -528,6 +538,114 @@
         voiceManager.stopListening();
       }
     });
+
+    // ===== 空闲互动（常驻陪伴感） =====
+    const IDLE_PHRASES = [
+      '在忙什么呢，开拓者？',
+      '记得休息一下眼睛哦～',
+      '无聊了...陪我聊聊天嘛！',
+      '我一直都在哦！',
+      '要不要起来喝口水？',
+      '嘿嘿，今天也辛苦啦！'
+    ];
+    const IDLE_DELAY = 60000;          // 空闲多久后开始主动互动
+    const IDLE_CHECK_INTERVAL = 5000;  // 空闲检测周期
+
+    let lastInteractionTime = Date.now();
+    let lastIdleActionTime = 0;
+
+    // ===== 应用设置（Task 3）与后端健康状态（Task 2） =====
+    let petSettings = {
+      idleInteraction: true,
+      quietHoursEnabled: false,  // Task 11.3
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00'
+    };
+
+    // Task 11.3: 判断当前是否处于静音时段（支持跨夜，如 23:00-08:00）
+    function isQuietHours() {
+      if (!petSettings.quietHoursEnabled) return false;
+      const start = petSettings.quietHoursStart;
+      const end = petSettings.quietHoursEnd;
+      if (!start || !end) return false;
+      const toMin = (t) => {
+        const parts = t.split(':').map(Number);
+        return (parts[0] || 0) * 60 + (parts[1] || 0);
+      };
+      const now = new Date();
+      const cur = now.getHours() * 60 + now.getMinutes();
+      const s = toMin(start);
+      const e = toMin(end);
+      if (s === e) return false;
+      if (s < e) return cur >= s && cur < e;
+      return cur >= s || cur < e;
+    }
+
+    (async function loadPetSettings() {
+      if (petAPI.getSettings) {
+        try {
+          petSettings = await petAPI.getSettings();
+        } catch (e) {
+          console.warn('[Pet] 读取设置失败:', e);
+        }
+      }
+    })();
+
+    if (petAPI.onSettingsChanged) {
+      petAPI.onSettingsChanged((settings) => {
+        if (settings) petSettings = settings;
+      });
+    }
+
+    if (petAPI.onBackendStatus) {
+      petAPI.onBackendStatus((status) => {
+        if (status && status.online === false) {
+          showVoiceBubble('呜...连不上服务器了', false, 4000);
+        }
+      });
+    }
+
+    function markInteraction() {
+      lastInteractionTime = Date.now();
+    }
+
+    function doIdleAction() {
+      // 语音交互进行中不打扰
+      if (isDragging || voiceManager._isProcessing ||
+          voiceManager.state === 'listening' || voiceManager.state === 'awake') {
+        return;
+      }
+      lastIdleActionTime = Date.now();
+
+      if (Math.random() < 0.4) {
+        // 表情小动画
+        const emotions = ['happy', 'surprised', 'thinking'];
+        const emotion = emotions[Math.floor(Math.random() * emotions.length)];
+        petImage.classList.remove('bounce', 'wiggle');
+        void petImage.offsetWidth; // 重置动画
+        petImage.classList.add('wiggle');
+        loadPetImage(emotion);
+        setTimeout(() => {
+          petImage.classList.remove('wiggle');
+          loadPetImage('normal');
+        }, 2500);
+      } else {
+        // 随机打招呼
+        const phrase = IDLE_PHRASES[Math.floor(Math.random() * IDLE_PHRASES.length)];
+        showVoiceBubble(phrase, false, 8000);
+        loadPetImage('happy');
+        setTimeout(() => loadPetImage('normal'), 3000);
+      }
+    }
+
+    setInterval(() => {
+      if (!petSettings.idleInteraction) return;
+      const now = Date.now();
+      if (now - lastInteractionTime >= IDLE_DELAY &&
+          now - lastIdleActionTime >= IDLE_DELAY) {
+        doIdleAction();
+      }
+    }, IDLE_CHECK_INTERVAL);
   </script>
 </body>
 </html>

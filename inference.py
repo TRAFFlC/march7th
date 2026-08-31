@@ -88,27 +88,34 @@ def rrf_fusion(
     bm25_results: List[Tuple[str, float]],
     k: int = 60,
     top_n: int = 5,
+    trust_map: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float, float, float]]:
     rrf_scores: Dict[str, float] = {}
     vector_ranks: Dict[str, int] = {}
     bm25_ranks: Dict[str, int] = {}
-    
+
     for rank, (doc, _) in enumerate(vector_results, 1):
         vector_ranks[doc] = rank
         rrf_scores[doc] = rrf_scores.get(doc, 0) + 1 / (k + rank)
-    
+
     for rank, (doc, _) in enumerate(bm25_results, 1):
         bm25_ranks[doc] = rank
         rrf_scores[doc] = rrf_scores.get(doc, 0) + 1 / (k + rank)
-    
+
     sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    
+
     results = []
     for doc, rrf_score in sorted_docs:
         v_rank = vector_ranks.get(doc, 999)
         b_rank = bm25_ranks.get(doc, 999)
-        results.append((doc, rrf_score, v_rank, b_rank))
-    
+        trust = 1.0
+        if trust_map and doc in trust_map:
+            try:
+                trust = max(0.0, min(1.0, float(trust_map[doc])))
+            except (TypeError, ValueError):
+                trust = 1.0
+        results.append((doc, rrf_score * trust, v_rank, b_rank))
+
     return results
 
 
@@ -372,11 +379,21 @@ class March7thChatbot:
         results = self.collection.query(
             query_embeddings=query_embedding.tolist(),
             n_results=self.top_k * 2,
-            include=["documents", "distances"]
+            include=["documents", "distances", "metadatas"]
         )
 
         documents = results["documents"][0] if results["documents"] else []
         distances = results["distances"][0] if results["distances"] else []
+        metadatas = results["metadatas"][0] if results["metadatas"] else []
+
+        # 信任元数据：条目 metadata 中的 trust（缺省 1.0），用于 RRF 融合分数加权
+        trust_map: Dict[str, float] = {}
+        for doc, meta in zip(documents, metadatas):
+            if doc not in trust_map and meta:
+                try:
+                    trust_map[doc] = max(0.0, min(1.0, float(meta.get("trust", 1.0))))
+                except (TypeError, ValueError):
+                    trust_map[doc] = 1.0
 
         if self.debug:
             print(f"\n[RAG Debug] 向量检索结果:")
@@ -389,21 +406,21 @@ class March7thChatbot:
             bm25_scores = self.bm25_index.get_scores(query)
             bm25_results = list(zip(self.all_documents, bm25_scores))
             bm25_results = sorted(bm25_results, key=lambda x: x[1], reverse=True)[:self.top_k * 2]
-            
+
             if self.debug:
                 print(f"\n[RAG Debug] BM25 检索结果:")
                 for i, (doc, score) in enumerate(bm25_results[:self.top_k]):
                     preview = doc[:50].replace('\n', ' ') + "..." if len(doc) > 50 else doc
                     print(f"  [{i+1}] score={score:.4f}: {preview}")
-            
+
             vector_results = list(zip(documents, distances))
-            fused_results = rrf_fusion(vector_results, bm25_results, top_n=self.top_k)
-            
+            fused_results = rrf_fusion(vector_results, bm25_results, top_n=self.top_k, trust_map=trust_map)
+
             if self.debug:
-                print(f"\n[RAG Debug] RRF 融合结果:")
+                print(f"\n[RAG Debug] RRF 融合结果（信任加权）:")
                 for doc, rrf_score, v_rank, b_rank in fused_results:
                     preview = doc[:50].replace('\n', ' ') + "..." if len(doc) > 50 else doc
-                    print(f"  RRF={rrf_score:.4f} (向量排名:{v_rank}, BM25排名:{b_rank}): {preview}")
+                    print(f"  RRF={rrf_score:.4f} (trust={trust_map.get(doc, 1.0):.2f}, 向量排名:{v_rank}, BM25排名:{b_rank}): {preview}")
             
             valid_docs = []
             valid_distances = []
@@ -446,8 +463,13 @@ class March7thChatbot:
                 db = get_db()
                 anchors = get_memory_anchors(db, user_id=self.user_id, character_id=self.character_id)
                 if anchors:
-                    anchor_block = self.compress_anchors(anchors)
-                    system_content += f"\n\n【重要记忆】\n{anchor_block}"
+                    top_anchors = sorted(
+                        anchors,
+                        key=lambda a: a.get('importance', 0.5),
+                        reverse=True
+                    )[:getattr(config, "MEMORY_ANCHOR_TOP_N", 3)]
+                    anchor_block = self.compress_anchors(top_anchors)
+                    system_content += f"\n\n【用户长期记忆】\n{anchor_block}"
             except Exception:
                 pass
 

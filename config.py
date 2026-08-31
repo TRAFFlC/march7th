@@ -64,6 +64,20 @@ PROFILE_SUMMARY_MAX_TOKENS = 500
 
 RERANK_TOP_K = 3
 
+# RAG 写入去重：写入前对现有集合做向量相似度检索，最高相似度达到阈值则跳过
+RAG_WRITE_DEDUP_THRESHOLD = 0.92
+
+# 自动画像一致性检测：每用户每角色每 N 轮对话检测一次（节流，避免 API 消耗失控）
+AUTO_CONSISTENCY_INTERVAL = 3
+
+# 弱权重自动写入实验开关（默认关闭）：auto 建议 confidence ≥ 阈值时自动写入 trust = confidence × 0.5 的条目
+AUTO_WEAK_WRITE_ENABLED = False
+AUTO_WEAK_WRITE_CONFIDENCE_THRESHOLD = 0.85
+AUTO_WEAK_WRITE_TRUST_FACTOR = 0.5
+
+# 记忆锚点注入：构建 LLM 上下文时注入 importance TOP N 锚点（标注为"用户长期记忆"）
+MEMORY_ANCHOR_TOP_N = 3
+
 CONFIG_AUTO_RELOAD = True
 CONFIG_CHECK_INTERVAL = 30
 

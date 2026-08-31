@@ -400,7 +400,12 @@
         <button class="btn btn-secondary btn-sm" @click="handleViewIterationSuggestions">
           🔍 查看修正建议
         </button>
-        
+
+        <button class="btn btn-secondary btn-sm suggestion-inbox-btn" @click="toggleSuggestionInbox">
+          📥 待确认建议
+          <span v-if="suggestionPendingCount > 0" class="suggestion-count-badge">{{ suggestionPendingCount }}</span>
+        </button>
+
         <button class="btn btn-secondary btn-sm" @click="toggleAnchors">
           <img src="/emojis/三月七_暗中观察.png" class="emoji-icon" /> 记忆锚点
         </button>
@@ -477,6 +482,82 @@
         </div>
       </div>
 
+      <div v-if="showSuggestionInbox" class="suggestion-inbox-panel">
+        <div class="suggestion-inbox-header">
+          <span>📥 待确认建议收件箱（自动检测）</span>
+          <button class="btn-close" @click="showSuggestionInbox = false">×</button>
+        </div>
+
+        <div v-if="suggestionStats" class="suggestion-stats">
+          <div class="stat-item">
+            <span class="stat-value">{{ suggestionStats.auto_generated }}</span>
+            <span class="stat-label">自动生成</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ suggestionStats.auto_confirmed }}</span>
+            <span class="stat-label">已确认</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ suggestionStats.auto_rejected }}</span>
+            <span class="stat-label">已驳回</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ confirmRateText }}</span>
+            <span class="stat-label">确认率</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ suggestionStats.rag_updated_total }}</span>
+            <span class="stat-label">RAG累计更新</span>
+          </div>
+        </div>
+
+        <div v-if="suggestionsLoading" class="suggestion-loading">
+          加载中...
+        </div>
+        <div v-else-if="suggestions.length === 0" class="suggestion-empty">
+          暂无待确认建议，系统会在对话完成后自动检测画像一致性问题
+        </div>
+        <div v-else class="suggestion-list">
+          <div v-for="suggestion in suggestions" :key="suggestion.id" class="suggestion-item">
+            <div class="suggestion-item-header">
+              <span :class="['confidence-badge', suggestion.confidence_level]">
+                {{ confidenceLabel(suggestion.confidence_level) }} {{ (suggestion.confidence * 100).toFixed(0) }}%
+              </span>
+              <span class="suggestion-type">{{ feedbackTypeLabel(suggestion.feedback_type) }}</span>
+              <span
+                v-if="suggestion.auto_written"
+                class="auto-written-badge"
+                title="实验开关开启时，高置信建议已自动写入弱权重条目"
+              >
+                已自动写入（弱权重{{ suggestion.auto_written_trust != null ? ' ' + Number(suggestion.auto_written_trust).toFixed(2) : '' }}）
+              </span>
+              <span class="suggestion-time">{{ formatSuggestionTime(suggestion.created_at) }}</span>
+            </div>
+            <div v-if="suggestion.user_input || suggestion.bot_reply" class="suggestion-conv">
+              <div v-if="suggestion.user_input" class="conv-user"><em>用户：</em>{{ suggestion.user_input }}</div>
+              <div v-if="suggestion.bot_reply" class="conv-bot"><em>回复：</em>{{ suggestion.bot_reply }}</div>
+            </div>
+            <div class="suggestion-content">{{ suggestionText(suggestion) }}</div>
+            <div class="suggestion-item-actions">
+              <button
+                class="btn btn-primary btn-sm"
+                @click="confirmSuggestion(suggestion)"
+                :disabled="suggestionActionLoading === suggestion.id"
+              >
+                ✓ 确认并写入RAG
+              </button>
+              <button
+                class="btn btn-danger btn-sm"
+                @click="rejectSuggestion(suggestion)"
+                :disabled="suggestionActionLoading === suggestion.id"
+              >
+                ✕ 驳回
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="showAnchors" class="anchors-panel">
         <div class="anchors-header">
           <span><img src="/emojis/三月七_暗中观察.png" class="emoji-icon" /> 记忆锚点管理</span>
@@ -540,7 +621,42 @@
           <button class="btn-close" @click="closeFeedbackModal">×</button>
         </div>
         <div class="modal-body">
-          <p class="modal-hint">请选择您遇到的问题类型：</p>
+          <div v-if="modalSuggestionsLoading" class="modal-suggestion-loading">
+            正在检测该轮已有的自动建议...
+          </div>
+          <template v-else-if="modalSuggestions.length > 0">
+            <p class="modal-hint">该轮已有自动检测建议，可直接确认或驳回：</p>
+            <div class="modal-suggestions">
+              <div v-for="suggestion in modalSuggestions" :key="suggestion.id" class="modal-suggestion-item">
+                <div class="modal-suggestion-header">
+                  <span :class="['confidence-badge', suggestion.confidence_level]">
+                    {{ confidenceLabel(suggestion.confidence_level) }} {{ (suggestion.confidence * 100).toFixed(0) }}%
+                  </span>
+                  <span class="suggestion-type">{{ feedbackTypeLabel(suggestion.feedback_type) }}</span>
+                  <span v-if="suggestion.auto_written" class="auto-written-badge">已自动写入（弱权重）</span>
+                </div>
+                <div class="suggestion-content">{{ suggestionText(suggestion) }}</div>
+                <div class="modal-suggestion-actions">
+                  <button
+                    class="btn btn-primary btn-sm"
+                    @click="confirmSuggestion(suggestion)"
+                    :disabled="suggestionActionLoading === suggestion.id"
+                  >
+                    ✓ 一键确认
+                  </button>
+                  <button
+                    class="btn btn-danger btn-sm"
+                    @click="rejectSuggestion(suggestion)"
+                    :disabled="suggestionActionLoading === suggestion.id"
+                  >
+                    ✕ 驳回
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p class="modal-hint">或选择问题类型重新生成：</p>
+          </template>
+          <p v-else class="modal-hint">请选择您遇到的问题类型：</p>
           <div class="feedback-options">
             <button class="btn btn-feedback-option" @click="submitFeedbackWithRating('fact_error')">
               ❌ 事实不符
@@ -656,6 +772,26 @@ const anchorsLoading = ref(false)
 const newAnchorContent = ref('')
 const newAnchorType = ref('manual')
 
+const showSuggestionInbox = ref(false)
+const suggestions = ref([])
+const suggestionsLoading = ref(false)
+const suggestionStats = ref(null)
+const suggestionActionLoading = ref(null)
+const modalSuggestions = ref([])
+const modalSuggestionsLoading = ref(false)
+let suggestionRefreshTimer = null
+
+const suggestionPendingCount = computed(() => {
+  if (!suggestionStats.value) return 0
+  return suggestionStats.value.auto_pending || 0
+})
+
+const confirmRateText = computed(() => {
+  const rate = suggestionStats.value?.confirm_rate
+  if (rate === null || rate === undefined) return '—'
+  return `${(rate * 100).toFixed(1)}%`
+})
+
 const waveformCanvas = ref(null)
 let audioContext = null
 let analyser = null
@@ -717,6 +853,8 @@ onMounted(async () => {
   } catch (e) {
     console.error('Failed to load user profile:', e)
   }
+
+  loadSuggestionStats()
 
   await loadSessions()
 
@@ -786,6 +924,10 @@ onUnmounted(() => {
   closeEventSource()
   stopAudioVisualization()
   document.removeEventListener('click', closeContextMenu)
+  if (suggestionRefreshTimer) {
+    clearTimeout(suggestionRefreshTimer)
+    suggestionRefreshTimer = null
+  }
 })
 
 function selectCharacter(char) {
@@ -1058,6 +1200,7 @@ function connectSSE(message) {
                 loadSessions()
               }
               loading.value = false
+              scheduleSuggestionBadgeRefresh()
             } else if (currentEventType === 'error') {
               if (messages.value[currentMessageIndex]) {
                 messages.value[currentMessageIndex].content = `错误: ${data.error || '流式传输失败'}`
@@ -1261,6 +1404,7 @@ async function sendMessage() {
           currentSessionId.value = response.session_id
           await loadSessions()
         }
+        scheduleSuggestionBadgeRefresh()
         
         if (response.audio) {
           currentAudio.value = `data:audio/wav;base64,${response.audio}`
@@ -1300,8 +1444,9 @@ async function clearHistory() {
     audioProgress.value = 0
     audioIsPlaying.value = false
     showRagIteration.value = false
-    ragIterationResult.value = ''
-    closeEventSource()
+  ragIterationResult.value = ''
+  modalSuggestions.value = []
+  closeEventSource()
   } catch (e) {
     console.error('Failed to clear history:', e)
   }
@@ -1321,6 +1466,7 @@ async function rateConversation(star) {
     if (star <= 3) {
       pendingRating.value = star
       showFeedbackModal.value = true
+      loadConversationSuggestions(lastConversationId.value)
     } else {
       feedbackMessage.value = '✅ 评分已提交，感谢您的反馈！'
       feedbackMessageType.value = 'success'
@@ -1669,6 +1815,169 @@ async function deleteAnchor(anchorId) {
   } catch (e) {
     console.error('Failed to delete anchor:', e)
   }
+}
+
+async function loadSuggestionStats() {
+  try {
+    const response = await api.get('/rag/suggestions/stats')
+    if (response.success) {
+      suggestionStats.value = response.stats || null
+    }
+  } catch (e) {
+    console.error('Failed to load suggestion stats:', e)
+  }
+}
+
+async function loadSuggestions() {
+  suggestionsLoading.value = true
+  try {
+    const response = await api.get('/rag/suggestions/pending')
+    if (response.success) {
+      suggestions.value = response.suggestions || []
+    }
+  } catch (e) {
+    console.error('Failed to load pending suggestions:', e)
+  } finally {
+    suggestionsLoading.value = false
+  }
+}
+
+function toggleSuggestionInbox() {
+  showSuggestionInbox.value = !showSuggestionInbox.value
+  if (showSuggestionInbox.value) {
+    loadSuggestions()
+    loadSuggestionStats()
+  }
+}
+
+async function loadConversationSuggestions(conversationId) {
+  if (!conversationId) {
+    modalSuggestions.value = []
+    return
+  }
+  modalSuggestionsLoading.value = true
+  try {
+    const response = await api.get(`/rag/suggestions/conversation/${conversationId}`)
+    if (response.success) {
+      modalSuggestions.value = (response.suggestions || []).filter(
+        s => s.suggestion_status === 'pending'
+      )
+    }
+  } catch (e) {
+    console.error('Failed to load conversation suggestions:', e)
+    modalSuggestions.value = []
+  } finally {
+    modalSuggestionsLoading.value = false
+  }
+}
+
+function _removeSuggestionFrom(id) {
+  suggestions.value = suggestions.value.filter(s => s.id !== id)
+  modalSuggestions.value = modalSuggestions.value.filter(s => s.id !== id)
+}
+
+async function confirmSuggestion(suggestion, fromModal = false) {
+  if (suggestionActionLoading.value !== null) return
+  suggestionActionLoading.value = suggestion.id
+  try {
+    const response = await api.post(`/rag/suggestions/${suggestion.id}/confirm`)
+    if (response.success) {
+      feedbackMessage.value = `✅ ${response.message || '建议已确认'}`
+      feedbackMessageType.value = 'success'
+      _removeSuggestionFrom(suggestion.id)
+    }
+  } catch (e) {
+    feedbackMessage.value = `❌ 确认失败: ${e.detail || '未知错误'}`
+    feedbackMessageType.value = 'error'
+  } finally {
+    suggestionActionLoading.value = null
+    setTimeout(() => { feedbackMessage.value = '' }, 4000)
+    await Promise.allSettled([loadSuggestions(), loadSuggestionStats()])
+  }
+}
+
+async function rejectSuggestion(suggestion) {
+  if (suggestionActionLoading.value !== null) return
+  if (!confirm('确定驳回此建议吗？驳回后将不会写入 RAG。')) return
+  suggestionActionLoading.value = suggestion.id
+  try {
+    const response = await api.post(`/rag/suggestions/${suggestion.id}/reject`)
+    if (response.success) {
+      feedbackMessage.value = `✅ ${response.message || '建议已驳回'}`
+      feedbackMessageType.value = 'success'
+      _removeSuggestionFrom(suggestion.id)
+    }
+  } catch (e) {
+    feedbackMessage.value = `❌ 驳回失败: ${e.detail || '未知错误'}`
+    feedbackMessageType.value = 'error'
+  } finally {
+    suggestionActionLoading.value = null
+    setTimeout(() => { feedbackMessage.value = '' }, 4000)
+    await Promise.allSettled([loadSuggestions(), loadSuggestionStats()])
+  }
+}
+
+function suggestionText(suggestion) {
+  const parsed = suggestion?.suggestion
+  if (!parsed) return ''
+  if (typeof parsed === 'string') return parsed
+  if (parsed.suggestion) {
+    return parsed.deviation ? `${parsed.deviation}：${parsed.suggestion}` : parsed.suggestion
+  }
+  if (parsed.correction) return parsed.correction
+  if (parsed.overall_suggestion) return parsed.overall_suggestion
+  if (Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+    const first = parsed.errors[0] || {}
+    return first.suggestion || first.content || ''
+  }
+  if (Array.isArray(parsed.deviations) && parsed.deviations.length > 0) {
+    const first = parsed.deviations[0] || {}
+    return first.suggestion || first.aspect || ''
+  }
+  if (Array.isArray(parsed.forgotten_points) && parsed.forgotten_points.length > 0) {
+    const first = parsed.forgotten_points[0] || {}
+    return first.point || ''
+  }
+  return ''
+}
+
+function confidenceLabel(level) {
+  if (level === 'high') return '高'
+  if (level === 'medium') return '中'
+  return '低'
+}
+
+function feedbackTypeLabel(type) {
+  const labels = {
+    fact_error: '事实不符',
+    role_deviation: '偏离角色',
+    history_forget: '遗忘历史',
+    think_leak: '思考泄露',
+    persona_consistency: '画像一致性'
+  }
+  return labels[type] || type || '综合'
+}
+
+function formatSuggestionTime(timeStr) {
+  if (!timeStr) return ''
+  try {
+    return new Date(timeStr).toLocaleString()
+  } catch {
+    return timeStr
+  }
+}
+
+function scheduleSuggestionBadgeRefresh() {
+  if (suggestionRefreshTimer) {
+    clearTimeout(suggestionRefreshTimer)
+  }
+  suggestionRefreshTimer = setTimeout(async () => {
+    suggestionRefreshTimer = null
+    await loadSuggestionStats()
+    if (showSuggestionInbox.value) {
+      await loadSuggestions()
+    }
+  }, 15000)
 }
 
 async function updateRagKnowledge() {
@@ -3285,6 +3594,231 @@ async function deleteSessionAction() {
 .anchor-importance {
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.suggestion-inbox-btn {
+  position: relative;
+}
+
+.suggestion-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 9px;
+  background: rgba(233, 69, 96, 0.9);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.suggestion-inbox-panel {
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid var(--border-color);
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.suggestion-inbox-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+  color: var(--accent-secondary);
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+
+.suggestion-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-item {
+  flex: 1;
+  min-width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.suggestion-loading,
+.suggestion-empty {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 16px;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.suggestion-item {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggestion-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.confidence-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.confidence-badge.high {
+  background: rgba(129, 199, 132, 0.2);
+  color: #81c784;
+}
+
+.confidence-badge.medium {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffd54f;
+}
+
+.confidence-badge.low {
+  background: rgba(158, 158, 158, 0.2);
+  color: #9e9e9e;
+}
+
+.suggestion-type {
+  font-size: 11px;
+  color: #64b5f6;
+  padding: 2px 8px;
+  background: rgba(33, 150, 243, 0.15);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.auto-written-badge {
+  font-size: 11px;
+  color: #ffd54f;
+  padding: 2px 8px;
+  background: rgba(255, 193, 7, 0.12);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.suggestion-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.suggestion-conv {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestion-conv em {
+  font-style: normal;
+  color: var(--text-primary);
+  opacity: 0.8;
+}
+
+.conv-user,
+.conv-bot {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.suggestion-content {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.suggestion-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-suggestion-loading {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.modal-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.modal-suggestion-item {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-suggestion-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-suggestion-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .feedback-message {

@@ -286,6 +286,231 @@
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
+
+    /* ===== Task 3: 设置按钮与设置面板 ===== */
+    .btn-settings {
+      background: rgba(150, 150, 200, 0.8);
+    }
+
+    .btn-settings:hover {
+      background: rgba(150, 150, 200, 1);
+    }
+
+    .btn-settings.active {
+      background: rgba(233, 69, 96, 1);
+    }
+
+    .settings-panel {
+      display: none;
+      position: fixed;
+      top: 64px;
+      left: 16px;
+      right: 16px;
+      bottom: 52px;
+      flex-direction: column;
+      background: rgba(22, 22, 40, 0.98);
+      border: 1px solid rgba(233, 69, 96, 0.35);
+      border-radius: 12px;
+      z-index: 50;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+      animation: fadeIn 0.2s ease;
+      overflow: hidden;
+    }
+
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: rgba(233, 69, 96, 0.2);
+      color: #ff6b9d;
+      font-size: 14px;
+    }
+
+    .settings-header .header-btn {
+      width: 22px;
+      height: 22px;
+      font-size: 12px;
+    }
+
+    .settings-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 8px;
+      border-radius: 10px;
+    }
+
+    .settings-row:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .settings-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      user-select: none;
+    }
+
+    .settings-name {
+      color: #f0f0f0;
+      font-size: 13px;
+    }
+
+    .settings-desc {
+      color: rgba(255, 255, 255, 0.45);
+      font-size: 11px;
+    }
+
+    .settings-toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .settings-toggle input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 11px;
+      transition: background 0.2s;
+      pointer-events: none;
+    }
+
+    .toggle-track:after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      top: 3px;
+      left: 3px;
+      transition: left 0.2s;
+    }
+
+    .settings-toggle input:checked + .toggle-track {
+      background: #e94560;
+    }
+
+    .settings-toggle input:checked + .toggle-track:after {
+      left: 21px;
+    }
+
+    .settings-status .status-dot {
+      flex-shrink: 0;
+    }
+
+    /* ===== Task 11: 后端地址输入与静音时段设置 ===== */
+    .settings-row.column {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .settings-row-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .settings-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .settings-input {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f0f0f0;
+      font-size: 12px;
+      outline: none;
+      user-select: text;
+    }
+
+    .settings-input:focus {
+      border-color: rgba(233, 69, 96, 0.6);
+    }
+
+    .settings-save-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #e94560 0%, #ff6b9d 100%);
+      color: white;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .quiet-hours-times {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 12px;
+    }
+
+    .settings-time {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f0f0f0;
+      font-size: 12px;
+      outline: none;
+      color-scheme: dark;
+    }
+
+    .settings-time:disabled {
+      opacity: 0.4;
+    }
+
+    /* ===== Task 1: 流式输出光标 ===== */
+    .message .stream-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 14px;
+      background: #ff6b9d;
+      margin-left: 2px;
+      vertical-align: -2px;
+      animation: cursorBlink 1s infinite;
+    }
+
+    @keyframes cursorBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -299,8 +524,136 @@
     <div class="chat-header">
       <h2>🌸 七音盒</h2>
       <div class="header-buttons">
+        <button class="header-btn btn-settings" id="settingsBtn" title="设置" onclick="toggleSettings()">⚙</button>
         <button class="header-btn btn-minimize" onclick="minimizeWindow()">−</button>
         <button class="header-btn btn-close" onclick="closeWindow()">×</button>
+      </div>
+    </div>
+
+    <!-- Task 3: 设置面板 -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="settings-header">
+        <span>⚙ 设置</span>
+        <button class="header-btn btn-minimize" onclick="toggleSettings()">×</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">流式回复</div>
+            <div class="settings-desc">AI 回复逐字显示（SSE 流式输出）</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-streamingChat" onchange="onSettingChange('streamingChat', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">自动播放语音</div>
+            <div class="settings-desc">收到回复后自动播放 TTS 语音</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-autoPlayAudio" onchange="onSettingChange('autoPlayAudio', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">桌面通知</div>
+            <div class="settings-desc">窗口隐藏时通知新回复与服务状态</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-notifyOnReply" onchange="onSettingChange('notifyOnReply', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">情绪联动</div>
+            <div class="settings-desc">桌宠表情随对话情绪变化</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-emotionSync" onchange="onSettingChange('emotionSync', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">语音唤醒</div>
+            <div class="settings-desc">后台唤醒词检测（需已安装模型）</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-wakeWordEnabled" onchange="onSettingChange('wakeWordEnabled', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">空闲互动</div>
+            <div class="settings-desc">长时间无操作时桌宠主动搭话</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-idleInteraction" onchange="onSettingChange('idleInteraction', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">开机自启动</div>
+            <div class="settings-desc">登录系统后自动运行桌宠</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-autoStart" onchange="onSettingChange('autoStart', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <!-- Task 11.1: 后端地址可配置 -->
+        <div class="settings-row column">
+          <div class="settings-info">
+            <div class="settings-name">后端地址</div>
+            <div class="settings-desc">API 服务地址，保存后立即生效</div>
+          </div>
+          <div class="settings-input-row">
+            <input type="text" id="set-backendUrl" class="settings-input" placeholder="http://127.0.0.1:8000" onkeypress="handleBackendUrlKeyPress(event)">
+            <button class="settings-save-btn" onclick="saveBackendUrl()">保存</button>
+          </div>
+        </div>
+        <!-- Task 11.2: 全局快捷键 -->
+        <div class="settings-row">
+          <div class="settings-info">
+            <div class="settings-name">全局快捷键</div>
+            <div class="settings-desc">Ctrl+Alt+M 显示/隐藏聊天窗口（全局生效）</div>
+          </div>
+          <div class="settings-toggle">
+            <input type="checkbox" id="set-globalShortcutEnabled" onchange="onSettingChange('globalShortcutEnabled', this.checked)">
+            <span class="toggle-track"></span>
+          </div>
+        </div>
+        <!-- Task 11.3: 静音时段 -->
+        <div class="settings-row column">
+          <div class="settings-row-top">
+            <div class="settings-info">
+              <div class="settings-name">静音时段</div>
+              <div class="settings-desc">时段内不自动播放语音，仅显示文字与通知（支持跨夜）</div>
+            </div>
+            <div class="settings-toggle">
+              <input type="checkbox" id="set-quietHoursEnabled" onchange="onSettingChange('quietHoursEnabled', this.checked)">
+              <span class="toggle-track"></span>
+            </div>
+          </div>
+          <div class="quiet-hours-times">
+            <input type="time" id="set-quietHoursStart" class="settings-time" onchange="onQuietHoursTimeChange('quietHoursStart', this.value)">
+            <span>至</span>
+            <input type="time" id="set-quietHoursEnd" class="settings-time" onchange="onQuietHoursTimeChange('quietHoursEnd', this.value)">
+          </div>
+        </div>
+        <div class="settings-row settings-status">
+          <div class="settings-info">
+            <div class="settings-name">后端服务</div>
+            <div class="settings-desc" id="backendStatusDesc">检测中...</div>
+          </div>
+          <div class="status-dot offline" id="backendStatusDot"></div>
+        </div>
       </div>
     </div>
 
@@ -334,46 +687,264 @@
     let recognition = null;
     let currentSessionId = null;
 
+    // ===== Task 2: 后端健康状态（null = 未知） =====
+    let backendOnline = null;
+
+    // ===== Task 3: 应用设置 =====
+    let appSettings = {
+      streamingChat: true,
+      autoPlayAudio: true,
+      notifyOnReply: true,
+      emotionSync: true,
+      wakeWordEnabled: true,
+      idleInteraction: true,
+      autoStart: false,
+      backendUrl: 'http://127.0.0.1:8000',  // Task 11.1
+      globalShortcutEnabled: true,          // Task 11.2
+      quietHoursEnabled: false,             // Task 11.3
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00'
+    };
+
+    async function loadAppSettings() {
+      if (window.electronAPI && window.electronAPI.getSettings) {
+        try {
+          appSettings = await window.electronAPI.getSettings();
+          // Task 11.1: apiBase 跟随设置中的后端地址
+          if (appSettings.backendUrl) apiBase = appSettings.backendUrl;
+        } catch (e) {
+          console.warn('[Chat] 读取设置失败:', e);
+        }
+      }
+    }
+
+    function onSettingChange(key, value) {
+      appSettings[key] = value;
+      if (window.electronAPI && window.electronAPI.setSettings) {
+        window.electronAPI.setSettings({ [key]: value }).then((settings) => {
+          if (settings) appSettings = settings;
+        }).catch(() => {});
+      }
+    }
+
+    function syncSettingsUI() {
+      const keys = ['streamingChat', 'autoPlayAudio', 'notifyOnReply', 'emotionSync',
+                    'wakeWordEnabled', 'idleInteraction', 'autoStart',
+                    'globalShortcutEnabled', 'quietHoursEnabled'];
+      for (const key of keys) {
+        const el = document.getElementById('set-' + key);
+        if (el) el.checked = !!appSettings[key];
+      }
+      // Task 11.1: 后端地址输入框（编辑中不覆盖）
+      const backendInput = document.getElementById('set-backendUrl');
+      if (backendInput && document.activeElement !== backendInput) {
+        backendInput.value = appSettings.backendUrl || '';
+      }
+      // Task 11.3: 静音时段起止时间
+      const startEl = document.getElementById('set-quietHoursStart');
+      const endEl = document.getElementById('set-quietHoursEnd');
+      if (startEl && document.activeElement !== startEl) {
+        startEl.value = appSettings.quietHoursStart || '23:00';
+      }
+      if (endEl && document.activeElement !== endEl) {
+        endEl.value = appSettings.quietHoursEnd || '08:00';
+      }
+      const quietEnabled = !!appSettings.quietHoursEnabled;
+      if (startEl) startEl.disabled = !quietEnabled;
+      if (endEl) endEl.disabled = !quietEnabled;
+    }
+
+    function toggleSettings() {
+      const panel = document.getElementById('settingsPanel');
+      const btn = document.getElementById('settingsBtn');
+      const show = panel.style.display !== 'flex';
+      if (show) {
+        syncSettingsUI();
+        panel.style.display = 'flex';
+        btn.classList.add('active');
+      } else {
+        panel.style.display = 'none';
+        btn.classList.remove('active');
+      }
+    }
+
+    if (window.electronAPI && window.electronAPI.onSettingsChanged) {
+      window.electronAPI.onSettingsChanged((settings) => {
+        if (settings) {
+          appSettings = settings;
+          // Task 11.1: 后端地址变化立即生效
+          if (settings.backendUrl) apiBase = settings.backendUrl;
+          syncSettingsUI();
+        }
+      });
+    }
+
+    // ===== Task 11.1: 后端地址编辑与保存 =====
+    function normalizeBackendUrl(raw) {
+      if (typeof raw !== 'string') return null;
+      let s = raw.trim().replace(/\/+$/, '');
+      if (!s) return null;
+      if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
+      try {
+        const u = new URL(s);
+        if (!u.hostname) return null;
+        return u.origin;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function saveBackendUrl() {
+      const input = document.getElementById('set-backendUrl');
+      const normalized = normalizeBackendUrl(input.value);
+      if (!normalized) {
+        input.value = appSettings.backendUrl || '';
+        addMessage('后端地址格式无效，已恢复原值', 'assistant');
+        return;
+      }
+      input.value = normalized;
+      apiBase = normalized; // 立即生效
+      appSettings.backendUrl = normalized;
+      if (window.electronAPI && window.electronAPI.setSettings) {
+        window.electronAPI.setSettings({ backendUrl: normalized }).then((settings) => {
+          if (settings && settings.backendUrl) {
+            appSettings = settings;
+            apiBase = settings.backendUrl;
+          }
+        }).catch(() => {});
+      }
+    }
+
+    function handleBackendUrlKeyPress(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveBackendUrl();
+      }
+    }
+
+    // ===== Task 11.3: 静音时段 =====
+    function onQuietHoursTimeChange(key, value) {
+      if (!value) return;
+      appSettings[key] = value;
+      if (window.electronAPI && window.electronAPI.setSettings) {
+        window.electronAPI.setSettings({ [key]: value }).then((settings) => {
+          if (settings) {
+            appSettings = settings;
+            if (settings.backendUrl) apiBase = settings.backendUrl;
+            syncSettingsUI();
+          }
+        }).catch(() => {});
+      }
+    }
+
+    function isQuietHours() {
+      if (!appSettings.quietHoursEnabled) return false;
+      const start = appSettings.quietHoursStart;
+      const end = appSettings.quietHoursEnd;
+      if (!start || !end) return false;
+      const toMin = (t) => {
+        const parts = t.split(':').map(Number);
+        return (parts[0] || 0) * 60 + (parts[1] || 0);
+      };
+      const now = new Date();
+      const cur = now.getHours() * 60 + now.getMinutes();
+      const s = toMin(start);
+      const e = toMin(end);
+      if (s === e) return false;
+      if (s < e) return cur >= s && cur < e;  // 同日内时段，如 12:00-14:00
+      return cur >= s || cur < e;             // 跨夜时段，如 23:00-08:00
+    }
+
+    // ===== Task 2: 后端健康状态展示 =====
+    function updateStatusBar() {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (!dot || !text) return;
+      if (backendOnline === false) {
+        dot.classList.add('offline');
+        text.textContent = '后端离线';
+      } else if (token) {
+        dot.classList.remove('offline');
+        text.textContent = '已连接';
+      } else {
+        dot.classList.add('offline');
+        text.textContent = '等待登录...';
+      }
+    }
+
+    function updateBackendStatusUI(online) {
+      backendOnline = online;
+      const dot = document.getElementById('backendStatusDot');
+      const desc = document.getElementById('backendStatusDesc');
+      if (dot) dot.classList.toggle('offline', !online);
+      if (desc) desc.textContent = online ? `在线（${apiBase.replace(/^https?:\/\//, '')}）` : '离线，等待自动恢复...';
+      updateStatusBar();
+      // 覆盖层文案随健康状态刷新
+      if (!token) setWaitingOverlay(true);
+    }
+
+    async function initBackendStatus() {
+      if (window.electronAPI && window.electronAPI.onBackendStatus) {
+        window.electronAPI.onBackendStatus((status) => updateBackendStatusUI(status.online));
+      }
+      if (window.electronAPI && window.electronAPI.getBackendStatus) {
+        try {
+          const status = await window.electronAPI.getBackendStatus();
+          updateBackendStatusUI(status.online);
+        } catch (e) {}
+      }
+    }
+
+    function setControlsEnabled(enabled) {
+      document.getElementById('chatInput').disabled = !enabled;
+      document.getElementById('voiceBtn').disabled = !enabled;
+      document.getElementById('sendBtn').disabled = !enabled;
+    }
+
+    function setWaitingOverlay(show) {
+      const overlay = document.getElementById('waitingOverlay');
+      overlay.style.display = show ? 'flex' : 'none';
+      if (show) {
+        const title = overlay.querySelector('h2');
+        const desc = overlay.querySelector('p');
+        if (backendOnline === false) {
+          title.textContent = '后端服务离线';
+          desc.textContent = `请检查后端服务（${apiBase}），恢复后将自动重连`;
+        } else {
+          title.textContent = '等待网页登录...';
+          desc.textContent = '请先在网页端登录七音盒';
+        }
+        setControlsEnabled(false);
+      } else {
+        setControlsEnabled(true);
+      }
+      updateStatusBar();
+    }
+
     async function checkSharedToken() {
       try {
         const response = await fetch(`${apiBase}/api/auth/shared-token`);
         const data = await response.json();
         
         if (data.success && data.token) {
-          const wasLoggedIn = token !== null;
           token = data.token;
           currentUser = data.user;
-          document.getElementById('waitingOverlay').style.display = 'none';
-          document.getElementById('statusDot').classList.remove('offline');
-          document.getElementById('statusText').textContent = '已连接';
+          setWaitingOverlay(false);
           document.getElementById('userName').textContent = currentUser?.username || '-';
-          document.getElementById('chatInput').disabled = false;
-          document.getElementById('voiceBtn').disabled = false;
-          document.getElementById('sendBtn').disabled = false;
-          return true;
+          updateStatusBar();
         } else {
           token = null;
           currentUser = null;
-          document.getElementById('waitingOverlay').style.display = 'flex';
-          document.getElementById('statusDot').classList.add('offline');
-          document.getElementById('statusText').textContent = '等待登录...';
+          setWaitingOverlay(true);
           document.getElementById('userName').textContent = '-';
-          document.getElementById('chatInput').disabled = true;
-          document.getElementById('voiceBtn').disabled = true;
-          document.getElementById('sendBtn').disabled = true;
-          return false;
+          updateStatusBar();
         }
       } catch (e) {
         token = null;
         currentUser = null;
-        document.getElementById('waitingOverlay').style.display = 'flex';
-        document.getElementById('statusDot').classList.add('offline');
-        document.getElementById('statusText').textContent = '离线';
+        setWaitingOverlay(true);
         document.getElementById('userName').textContent = '-';
-        document.getElementById('chatInput').disabled = true;
-        document.getElementById('voiceBtn').disabled = true;
-        document.getElementById('sendBtn').disabled = true;
-        return false;
+        updateStatusBar();
       }
     }
 
@@ -483,22 +1054,162 @@
       }
     }
 
-    async function sendMessage() {
-      const input = document.getElementById('chatInput');
-      const message = input.value.trim();
+    // ===== Task 1: SSE 流式聊天 =====
+    function createStreamingMessage() {
+      const messagesEl = document.getElementById('chatMessages');
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message assistant';
 
-      if (!message || !token) return;
+      const textEl = document.createElement('span');
+      textEl.className = 'msg-text';
 
-      if (!currentSessionId) {
-        await ensureSession(message);
-        if (!currentSessionId) {
-          addMessage('无法创建会话', 'assistant');
-          return;
+      const cursor = document.createElement('span');
+      cursor.className = 'stream-cursor';
+
+      messageEl.appendChild(textEl);
+      messageEl.appendChild(cursor);
+      messagesEl.appendChild(messageEl);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      return messageEl;
+    }
+
+    function appendStreamText(messageEl, text) {
+      if (!messageEl) return;
+      const textEl = messageEl.querySelector('.msg-text');
+      if (textEl) textEl.textContent += text;
+      const messagesEl = document.getElementById('chatMessages');
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function finalizeStreamingMessage(messageEl) {
+      if (!messageEl) return;
+      const cursor = messageEl.querySelector('.stream-cursor');
+      if (cursor) cursor.remove();
+
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      messageEl.appendChild(time);
+    }
+
+    async function sendMessageStream(message) {
+      // 返回 true 表示流式请求已建立（消息已送达后端，无需回退）；false 表示可回退到普通请求
+      setTyping(true);
+      let replyEl = null;
+      let fullText = '';
+
+      const finish = () => {
+        setTyping(false);
+        if (replyEl) {
+          finalizeStreamingMessage(replyEl);
+          replyEl = null;
         }
-      }
+      };
 
-      input.value = '';
-      addMessage(message, 'user');
+      try {
+        const response = await fetch(`${apiBase}/api/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            message: message,
+            character_id: 'march7th',
+            session_id: currentSessionId
+          })
+        });
+
+        if (!response.ok || !response.body) {
+          // 请求未能建立（接口不可用/网关错误），消息未送达，可安全回退
+          finish();
+          return false;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentEventType = '';
+        let gotDone = false;
+        let gotError = false;
+
+        const processChunk = ({ done, value }) => {
+          if (done) return Promise.resolve();
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEventType = line.slice(7).trim();
+              continue;
+            }
+            if (!line.startsWith('data: ')) continue;
+
+            let data;
+            try {
+              data = JSON.parse(line.slice(6));
+            } catch (e) {
+              continue;
+            }
+
+            if (currentEventType === 'text' && data.content) {
+              if (!replyEl) {
+                setTyping(false);
+                replyEl = createStreamingMessage();
+              }
+              appendStreamText(replyEl, data.content);
+              fullText += data.content;
+            } else if (currentEventType === 'audio' && data.audio) {
+              if (appSettings.autoPlayAudio) playAudio(data.audio);
+            } else if (currentEventType === 'done') {
+              gotDone = true;
+              finish();
+              if (data.session_id && !currentSessionId) {
+                currentSessionId = data.session_id;
+                if (window.electronAPI && window.electronAPI.setDesktopSession) {
+                  window.electronAPI.setDesktopSession(currentSessionId);
+                }
+              }
+              // Task 4: 聊天窗口被隐藏时通过主进程弹出桌面通知
+              requestReplyNotification(fullText);
+            } else if (currentEventType === 'error') {
+              gotError = true;
+              finish();
+              addMessage(`出错了：${data.error || '流式响应失败'}`, 'assistant');
+            }
+          }
+
+          return reader.read().then(processChunk);
+        };
+
+        await reader.read().then(processChunk);
+
+        if (!gotDone && !gotError) {
+          // Task 11.4: 流意外中断——已有内容保留并提示"回复中断"，播放队列继续播完
+          finish();
+          if (fullText) {
+            addMessage('⚠ 回复中断，以上为已收到的部分内容', 'assistant');
+          } else {
+            addMessage('连接中断，请重试', 'assistant');
+          }
+        }
+
+        return true;
+      } catch (e) {
+        console.error('[Chat] 流式请求失败:', e);
+        finish();
+        // Task 11.4: 已收到部分内容时提示中断并保留，不回退重发（避免消息重复送达）
+        if (fullText) {
+          addMessage('⚠ 回复中断，以上为已收到的部分内容', 'assistant');
+          return true;
+        }
+        return false;
+      }
+    }
+
+    async function sendMessageBlocking(message) {
       setTyping(true);
 
       try {
@@ -520,9 +1231,15 @@
 
         if (data.success) {
           addMessage(data.response, 'assistant');
-          if (data.audio) {
+          // Task 4: 情绪联动（非流式路径的即时反馈；流式路径由主进程情绪流驱动）
+          if (appSettings.emotionSync && data.emotion &&
+              window.electronAPI && window.electronAPI.petEmotion) {
+            window.electronAPI.petEmotion(data.emotion);
+          }
+          if (data.audio && appSettings.autoPlayAudio) {
             playAudio(data.audio);
           }
+          requestReplyNotification(data.response);
         } else {
           addMessage('抱歉，出了点小问题...', 'assistant');
         }
@@ -532,47 +1249,102 @@
       }
     }
 
+    // ===== Task 4: 请求桌面通知（由主进程判断窗口可见性） =====
+    function requestReplyNotification(text) {
+      if (!appSettings.notifyOnReply) return;
+      if (window.electronAPI && window.electronAPI.notifyMessage) {
+        const preview = (text || '').trim();
+        window.electronAPI.notifyMessage(
+          '三月七',
+          preview.length > 60 ? preview.substring(0, 60) + '...' : (preview || '收到新回复')
+        );
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const message = input.value.trim();
+
+      if (!message || !token) return;
+
+      if (!currentSessionId) {
+        await ensureSession(message);
+        if (!currentSessionId) {
+          addMessage('无法创建会话', 'assistant');
+          return;
+        }
+      }
+
+      input.value = '';
+      addMessage(message, 'user');
+
+      // Task 1: 优先使用 SSE 流式输出，连接失败时回退到普通请求
+      if (appSettings.streamingChat) {
+        const handled = await sendMessageStream(message);
+        if (handled) return;
+      }
+      await sendMessageBlocking(message);
+    }
+
+    // ===== Task 11.4: 音频顺序播放队列（SSE 多段音频不打断） =====
     let chatAudio = null;
+    const audioQueue = [];
+    let audioPlaying = false;
+
     function playAudio(base64Audio) {
-      console.log('[Chat] playAudio 被调用，音频数据长度:', base64Audio ? base64Audio.length : 0);
-      
-      if (!base64Audio) {
-        console.log('[Chat] 没有音频数据');
+      if (!base64Audio) return;
+      // Task 11.3: 静音时段内不自动播放 TTS，仅显示文字与通知
+      if (isQuietHours()) {
+        console.log('[Chat] 当前处于静音时段，跳过自动播放语音');
         return;
       }
-      
-      if (chatAudio) {
-        chatAudio.pause();
-        chatAudio = null;
+      audioQueue.push(base64Audio);
+      if (!audioPlaying) playNextAudio();
+    }
+
+    function playNextAudio() {
+      const next = audioQueue.shift();
+      if (!next) {
+        audioPlaying = false;
+        onAudioQueueDrained();
+        return;
       }
-      
+      audioPlaying = true;
+
       try {
-        chatAudio = new Audio(`data:audio/wav;base64,${base64Audio}`);
-        
-        chatAudio.addEventListener('playing', () => {
-          console.log('[Chat] 音频正在播放');
-        });
-        
-        chatAudio.addEventListener('ended', () => {
-          console.log('[Chat] 音频播放结束');
+        const audio = new Audio(`data:audio/wav;base64,${next}`);
+        chatAudio = audio;
+
+        audio.addEventListener('ended', () => {
           chatAudio = null;
+          playNextAudio();
         });
-        
-        chatAudio.addEventListener('error', (e) => {
+
+        audio.addEventListener('error', (e) => {
           console.error('[Chat] 音频播放错误:', e);
           chatAudio = null;
+          playNextAudio();
         });
-        
-        const playPromise = chatAudio.play();
+
+        const playPromise = audio.play();
         if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log('[Chat] 音频播放成功');
-          }).catch(e => {
+          playPromise.catch((e) => {
             console.error('[Chat] 音频播放失败:', e.name, e.message);
+            chatAudio = null;
+            playNextAudio();
           });
         }
       } catch (e) {
         console.error('[Chat] 创建音频失败:', e);
+        chatAudio = null;
+        playNextAudio();
+      }
+    }
+
+    // Task 11.6: 本轮音频全部播放结束后，桌宠表情回退 neutral
+    function onAudioQueueDrained() {
+      if (appSettings.emotionSync && window.electronAPI && window.electronAPI.petEmotion) {
+        window.electronAPI.petEmotion('neutral');
       }
     }
 
@@ -663,8 +1435,16 @@
       }
     }
 
-    checkSharedToken();
+    // Task 11.1: 先加载设置（后端地址等），再发起 Token 检查，确保首次请求即用配置地址
+    (async () => {
+      await loadAppSettings();
+      syncSettingsUI();
+      await checkSharedToken();
+    })();
     setInterval(checkSharedToken, 2000);
+
+    // Task 2/Task 3: 初始化后端健康状态与设置
+    initBackendStatus();
 
     console.log('[Chat] 页面加载完成，检查 electronAPI...');
     if (window.electronAPI) {
@@ -708,7 +1488,7 @@
           setTimeout(() => {
             setTyping(false);
             addMessage(data.response, 'assistant');
-            if (data.audio) {
+            if (data.audio && appSettings.autoPlayAudio) {
               console.log('[Chat] 准备播放音频...');
               playAudio(data.audio);
             }

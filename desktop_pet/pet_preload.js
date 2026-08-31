@@ -49,4 +49,16 @@ contextBridge.exposeInMainWorld('petAPI', {
   onAsrError: (callback) => {
     ipcRenderer.on('asr-error', (event, error) => callback(error));
   },
+
+  // ===== Task 2: 后端健康监测 =====
+  getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),
+  onBackendStatus: (callback) => {
+    ipcRenderer.on('backend-status', (event, status) => callback(status));
+  },
+
+  // ===== Task 3: 设置 =====
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  onSettingsChanged: (callback) => {
+    ipcRenderer.on('settings-changed', (event, settings) => callback(settings));
+  }
 });

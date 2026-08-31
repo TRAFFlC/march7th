@@ -6,6 +6,7 @@ class FeedbackType(str, Enum):
     ROLE_DEVIATION = "role_deviation"
     HISTORY_FORGET = "history_forget"
     THINK_LEAK = "think_leak"
+    PERSONA_CONSISTENCY = "persona_consistency"
 
 
 FEEDBACK_TYPE_LABELS = {
@@ -13,6 +14,7 @@ FEEDBACK_TYPE_LABELS = {
     FeedbackType.ROLE_DEVIATION: "偏离角色",
     FeedbackType.HISTORY_FORGET: "遗忘历史",
     FeedbackType.THINK_LEAK: "思考泄露",
+    FeedbackType.PERSONA_CONSISTENCY: "画像一致性",
 }
 
 FEEDBACK_TYPE_DESCRIPTIONS = {
@@ -20,4 +22,5 @@ FEEDBACK_TYPE_DESCRIPTIONS = {
     FeedbackType.ROLE_DEVIATION: "回答偏离了角色的性格或说话风格",
     FeedbackType.HISTORY_FORGET: "回答忽略了之前的对话历史或上下文",
     FeedbackType.THINK_LEAK: "回答中暴露了模型的思考过程（如内部推理、分析步骤）",
+    FeedbackType.PERSONA_CONSISTENCY: "自动检测角色发言是否符合其画像/人设",
 }

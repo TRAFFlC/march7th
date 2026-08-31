@@ -277,6 +277,29 @@ class DatabaseManager:
                 cursor.execute('ALTER TABLE feedback_details ADD COLUMN rag_updated BOOLEAN DEFAULT FALSE')
                 print("[DB] feedback_details.rag_updated 列添加成功")
 
+            cursor.execute("SHOW COLUMNS FROM feedback_details LIKE 'origin'")
+            if not cursor.fetchone():
+                print("[DB] 添加 feedback_details.origin 列...")
+                cursor.execute(
+                    "ALTER TABLE feedback_details ADD COLUMN origin VARCHAR(10) DEFAULT 'user'")
+                print("[DB] feedback_details.origin 列添加成功")
+
+            cursor.execute("SHOW COLUMNS FROM feedback_details LIKE 'confidence'")
+            if not cursor.fetchone():
+                print("[DB] 添加 feedback_details.confidence 列...")
+                cursor.execute(
+                    'ALTER TABLE feedback_details ADD COLUMN confidence FLOAT DEFAULT 1.0')
+                print("[DB] feedback_details.confidence 列添加成功")
+
+            cursor.execute("SHOW COLUMNS FROM feedback_details LIKE 'suggestion_status'")
+            if not cursor.fetchone():
+                print("[DB] 添加 feedback_details.suggestion_status 列...")
+                cursor.execute(
+                    "ALTER TABLE feedback_details ADD COLUMN suggestion_status VARCHAR(20) DEFAULT 'pending'")
+                cursor.execute(
+                    'ALTER TABLE feedback_details ADD INDEX idx_suggestion_status (suggestion_status)')
+                print("[DB] feedback_details.suggestion_status 列添加成功")
+
             cursor.execute("SHOW COLUMNS FROM conversations LIKE 'needs_feedback'")
             if not cursor.fetchone():
                 print("[DB] 添加 conversations.needs_feedback 列...")
@@ -691,17 +714,23 @@ def get_user_profile_info(db: DatabaseManager, user_id: int) -> Optional[Dict[st
 def save_feedback_detail(db: DatabaseManager, conversation_id: int, user_id: int,
                          feedback_type: str, context_snapshot: dict = None,
                          correction_suggestion: str = None, model_name: str = None,
-                         confirmed: bool = False) -> Optional[int]:
+                         confirmed: bool = False, origin: str = 'user',
+                         confidence: float = 1.0,
+                         suggestion_status: str = 'pending') -> Optional[int]:
     try:
         import json
         with db.get_cursor() as cursor:
             cursor.execute(
                 """INSERT INTO feedback_details
-                   (conversation_id, user_id, feedback_type, context_snapshot, correction_suggestion, model_name, confirmed)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                   (conversation_id, user_id, feedback_type, context_snapshot, correction_suggestion,
+                    model_name, confirmed, origin, confidence, suggestion_status)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (conversation_id, user_id, feedback_type,
                  json.dumps(context_snapshot, ensure_ascii=False) if context_snapshot else None,
-                 correction_suggestion, model_name, confirmed)
+                 correction_suggestion, model_name, confirmed,
+                 origin if origin in ('user', 'auto') else 'user',
+                 max(0.0, min(1.0, float(confidence))) if confidence is not None else 1.0,
+                 suggestion_status if suggestion_status in ('pending', 'confirmed', 'rejected') else 'pending')
             )
             return cursor.lastrowid
     except Exception:
@@ -746,14 +775,120 @@ def confirm_feedback_detail(db: DatabaseManager, feedback_detail_id: int, user_i
         with db.get_cursor() as cursor:
             if user_id is not None:
                 cursor.execute(
-                    "UPDATE feedback_details SET confirmed = TRUE WHERE id = %s AND user_id = %s",
+                    "UPDATE feedback_details SET confirmed = TRUE, suggestion_status = 'confirmed' WHERE id = %s AND user_id = %s",
                     (feedback_detail_id, user_id)
                 )
             else:
                 cursor.execute(
-                    "UPDATE feedback_details SET confirmed = TRUE WHERE id = %s",
+                    "UPDATE feedback_details SET confirmed = TRUE, suggestion_status = 'confirmed' WHERE id = %s",
                     (feedback_detail_id,)
                 )
+            return cursor.rowcount > 0
+    except Exception:
+        return False
+
+
+def reject_feedback_detail(db: DatabaseManager, feedback_detail_id: int, user_id: int = None) -> bool:
+    try:
+        with db.get_cursor() as cursor:
+            if user_id is not None:
+                cursor.execute(
+                    "UPDATE feedback_details SET suggestion_status = 'rejected' WHERE id = %s AND user_id = %s",
+                    (feedback_detail_id, user_id)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE feedback_details SET suggestion_status = 'rejected' WHERE id = %s",
+                    (feedback_detail_id,)
+                )
+            return cursor.rowcount > 0
+    except Exception:
+        return False
+
+
+def get_pending_suggestions(db: DatabaseManager, user_id: int = None,
+                           origin: str = 'auto', limit: int = 50) -> List[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        query = """SELECT fd.*, c.user_input AS conv_user_input, c.bot_reply AS conv_bot_reply,
+                          c.character AS conv_character, c.id AS conv_id
+                   FROM feedback_details fd
+                   LEFT JOIN conversations c ON fd.conversation_id = c.id
+                   WHERE fd.suggestion_status = 'pending'"""
+        params = []
+        if user_id is not None:
+            query += " AND fd.user_id = %s"
+            params.append(user_id)
+        if origin is not None:
+            query += " AND fd.origin = %s"
+            params.append(origin)
+        query += " ORDER BY fd.created_at DESC LIMIT %s"
+        params.append(limit)
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+
+def get_pending_suggestions_by_conversation(db: DatabaseManager, conversation_id: int,
+                                            user_id: int = None) -> List[Dict[str, Any]]:
+    with db.get_cursor() as cursor:
+        query = """SELECT fd.*, c.user_input AS conv_user_input, c.bot_reply AS conv_bot_reply,
+                          c.character AS conv_character
+                   FROM feedback_details fd
+                   LEFT JOIN conversations c ON fd.conversation_id = c.id
+                   WHERE fd.conversation_id = %s AND fd.suggestion_status = 'pending'"""
+        params = [conversation_id]
+        if user_id is not None:
+            query += " AND fd.user_id = %s"
+            params.append(user_id)
+        query += " ORDER BY fd.created_at DESC"
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+
+def get_feedback_loop_stats(db: DatabaseManager, user_id: int = None) -> Dict[str, Any]:
+    with db.get_cursor() as cursor:
+        user_filter = ""
+        params = []
+        if user_id is not None:
+            user_filter = " AND user_id = %s"
+            params.append(user_id)
+
+        def _count(extra: str) -> int:
+            cursor.execute(
+                f"SELECT COUNT(*) AS cnt FROM feedback_details WHERE 1=1{user_filter}{extra}",
+                params
+            )
+            return cursor.fetchone()['cnt']
+
+        auto_total = _count(" AND origin = 'auto'")
+        auto_confirmed = _count(
+            " AND origin = 'auto' AND suggestion_status = 'confirmed'")
+        auto_rejected = _count(
+            " AND origin = 'auto' AND suggestion_status = 'rejected'")
+        pending_total = _count(" AND suggestion_status = 'pending'")
+        rag_updated_total = _count(" AND rag_updated = TRUE")
+
+        decided = auto_confirmed + auto_rejected
+        confirm_rate = round(auto_confirmed / decided, 4) if decided > 0 else None
+
+        return {
+            "auto_generated": auto_total,
+            "auto_confirmed": auto_confirmed,
+            "auto_rejected": auto_rejected,
+            "auto_pending": auto_total - auto_confirmed - auto_rejected,
+            "pending_total": pending_total,
+            "confirm_rate": confirm_rate,
+            "rag_updated_total": rag_updated_total,
+        }
+
+
+def update_feedback_suggestion_json(db: DatabaseManager, feedback_detail_id: int,
+                                     correction_suggestion: str) -> bool:
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "UPDATE feedback_details SET correction_suggestion = %s WHERE id = %s",
+                (correction_suggestion, feedback_detail_id)
+            )
             return cursor.rowcount > 0
     except Exception:
         return False

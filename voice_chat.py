@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import re
 import threading
@@ -550,7 +551,7 @@ class VoiceChatController:
         return audio_bytes
 
     async def synthesize_audio_async(self, text: str, emotion: str = "neutral", character_id: str = None) -> bytes:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._synthesize_for_stream, text, emotion, character_id)
 
     def _synthesize_for_stream(self, text: str, emotion: str = "neutral", character_id: str = None) -> bytes:
@@ -586,9 +587,18 @@ class VoiceChatController:
 
         text_buffer = ""
         full_response = ""
-        sentences_to_synthesize = []
         conversation_id = None
         actual_character_id = character_id or self.current_character_id
+
+        # 流式TTS分句合成：LLM 每产出一个完整句子即入队合成，
+        # 合成完成后立即向下游推送该句音频（前端按序播放）。
+        sentence_queue: asyncio.Queue = asyncio.Queue()
+        audio_result_queue: asyncio.Queue = asyncio.Queue()
+        llm_done = asyncio.Event()
+        current_emotion = emotion or "neutral"
+        queued_sentence_count = 0
+        consumed_result_count = 0
+        tts_synthesized_count = 0
 
         def find_sentence_end(buffer: str) -> Tuple[str, str]:
             match = SENTENCE_END_PATTERN.search(buffer)
@@ -598,6 +608,67 @@ class VoiceChatController:
                 remaining = buffer[end_pos:]
                 return sentence, remaining
             return "", buffer
+
+        def enqueue_sentence(raw_sentence: str) -> int:
+            """提取句内情绪标签并更新当前情绪，清洗后入队待合成。"""
+            nonlocal current_emotion
+            emotion_match = EMOTION_PATTERN.search(raw_sentence)
+            if emotion_match:
+                current_emotion = emotion_match.group(1).lower()
+                log(f"检测到情绪标签: {current_emotion}")
+            clean_sentence = clean_emotion_tag(raw_sentence)
+            if not clean_sentence:
+                return 0
+            sentence_queue.put_nowait((clean_sentence, current_emotion))
+            return 1
+
+        async def tts_sentence_worker() -> None:
+            """逐句合成TTS音频。
+
+            API模式下与LLM流式生成并行；本地(ollama)模式下等待LLM
+            生成完毕再启动TTS，避免LLM/TTS显存竞争。
+            """
+            nonlocal tts_synthesized_count
+            try:
+                while True:
+                    item = await sentence_queue.get()
+                    if item is None:
+                        return
+                    sentence, sentence_emotion = item
+                    if not self.is_api_mode():
+                        await llm_done.wait()
+                    sentence_start = time.time()
+                    try:
+                        audio_bytes = await self.synthesize_audio_async(
+                            sentence, sentence_emotion, actual_character_id)
+                    except Exception as e:
+                        log(f"TTS分句合成失败: {e}")
+                        audio_bytes = b''
+                    if audio_bytes:
+                        tts_synthesized_count += 1
+                        log(f"分句TTS完成: {sentence[:30]}... 耗时: {time.time() - sentence_start:.2f}s, "
+                            f"大小: {len(audio_bytes)} bytes")
+                    await audio_result_queue.put((sentence, audio_bytes))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log(f"TTS合成任务异常: {e}")
+
+        def drain_audio_results() -> List[dict]:
+            nonlocal consumed_result_count
+            events = []
+            while not audio_result_queue.empty():
+                sentence, audio_bytes = audio_result_queue.get_nowait()
+                consumed_result_count += 1
+                if audio_bytes:
+                    events.append({
+                        "type": "audio",
+                        "audio": base64.b64encode(audio_bytes).decode('utf-8'),
+                        "text": sentence,
+                    })
+            return events
+
+        tts_task = asyncio.create_task(tts_sentence_worker())
 
         try:
             for chunk in self.llm.generate_stream(
@@ -613,18 +684,55 @@ class VoiceChatController:
                 text_buffer += chunk
                 full_response += chunk
 
-                sentence, text_buffer = find_sentence_end(text_buffer)
-                if sentence:
+                # 一个chunk可能包含多个句子，逐句切分入队
+                while True:
+                    sentence, text_buffer = find_sentence_end(text_buffer)
+                    if not sentence:
+                        break
                     clean_sentence = clean_emotion_tag(sentence)
                     if clean_sentence:
                         yield {"type": "text", "content": clean_sentence}
-                    sentences_to_synthesize.append(sentence)
+                    queued_sentence_count += enqueue_sentence(sentence)
+
+                # 让出控制权使TTS worker可被调度，及时推送已合成的分句音频
+                if queued_sentence_count:
+                    await asyncio.sleep(0)
+                    for audio_event in drain_audio_results():
+                        yield audio_event
 
             if text_buffer.strip():
                 clean_buffer = clean_emotion_tag(text_buffer)
                 if clean_buffer:
                     yield {"type": "text", "content": clean_buffer}
-                sentences_to_synthesize.append(text_buffer)
+                queued_sentence_count += enqueue_sentence(text_buffer)
+
+            # LLM生成完毕：本地模式下此时才允许TTS启动
+            llm_done.set()
+
+            # 通知worker收尾，逐句等待合成完成并推送（不阻塞至全部合成结束）
+            await sentence_queue.put(None)
+            while consumed_result_count < queued_sentence_count:
+                get_audio_task = asyncio.ensure_future(audio_result_queue.get())
+                await asyncio.wait(
+                    {get_audio_task, tts_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if get_audio_task.done():
+                    sentence, audio_bytes = get_audio_task.result()
+                    consumed_result_count += 1
+                    if audio_bytes:
+                        yield {
+                            "type": "audio",
+                            "audio": base64.b64encode(audio_bytes).decode('utf-8'),
+                            "text": sentence,
+                        }
+                else:
+                    get_audio_task.cancel()
+                    log("TTS worker提前退出，跳过剩余分句音频")
+                    break
+
+            if not tts_task.done():
+                await tts_task
 
             detected_emotion = emotion
             emotion_match = EMOTION_PATTERN.search(full_response)
@@ -638,27 +746,9 @@ class VoiceChatController:
                 except Exception:
                     detected_emotion = "neutral"
 
-            full_text_for_tts = ''.join(sentences_to_synthesize)
-            clean_full_text = clean_emotion_tag(full_text_for_tts)
-            
-            if clean_full_text:
-                try:
-                    audio_bytes = await self.synthesize_audio_async(clean_full_text, detected_emotion, actual_character_id)
-                    if audio_bytes:
-                        import base64
-                        audio_base64 = base64.b64encode(
-                            audio_bytes).decode('utf-8')
-                        yield {
-                            "type": "audio",
-                            "audio": audio_base64,
-                            "text": clean_full_text
-                        }
-                except Exception as e:
-                    log(f"TTS处理失败: {e}")
-
             char_name = self.current_character.name if self.current_character else None
             conversation_id = self._save_to_history(
-                user_input, full_response, user_id=user_id, character=char_name, 
+                user_input, full_response, user_id=user_id, character=char_name,
                 session_id=session_id, emotion=detected_emotion
             )
 
@@ -667,6 +757,10 @@ class VoiceChatController:
             yield {
                 "type": "done",
                 "conversation_id": conversation_id,
+                "tts_sentences": {
+                    "total": queued_sentence_count,
+                    "synthesized": tts_synthesized_count,
+                },
                 "rag_info": {
                     "enabled": rag_debug.get("enabled", False),
                     "status": rag_debug.get("status", "unknown"),
@@ -684,6 +778,13 @@ class VoiceChatController:
             log(f"流式处理错误: {e}")
             yield {"type": "error", "error": str(e)}
         finally:
+            llm_done.set()
+            if not tts_task.done():
+                tts_task.cancel()
+            try:
+                await tts_task
+            except (asyncio.CancelledError, Exception):
+                pass
             if self.tts_active:
                 self._release_tts()
             self._release_llm()

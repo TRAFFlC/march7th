@@ -168,6 +168,14 @@ function stopListening() {
     });
 }
 
+function setWindow(window) {
+    mainWindow = window;
+    // 窗口重建后同步当前监听状态，让新页面的指示器恢复显示
+    if (window && !window.isDestroyed() && isListening) {
+        window.webContents.send('wake-word-listening', true);
+    }
+}
+
 function setupIpcHandlers() {
     ipcMain.handle('kws-start', async (event) => {
         const win = require('electron').BrowserWindow.fromWebContents(event.sender);
@@ -196,5 +204,6 @@ function setupIpcHandlers() {
 module.exports = {
     startListening,
     stopListening,
+    setWindow,
     setupIpcHandlers,
 };

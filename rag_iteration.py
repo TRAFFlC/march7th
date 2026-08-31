@@ -91,15 +91,17 @@ FACT_ERROR_PROMPT = ""
 ROLE_DEVIATION_PROMPT = ""
 HISTORY_FORGET_PROMPT = ""
 THINK_LEAK_ANALYSIS_PROMPT = ""
+PERSONA_CONSISTENCY_PROMPT = ""
 
 
 def _ensure_prompts():
-    global FACT_ERROR_PROMPT, ROLE_DEVIATION_PROMPT, HISTORY_FORGET_PROMPT, THINK_LEAK_ANALYSIS_PROMPT
+    global FACT_ERROR_PROMPT, ROLE_DEVIATION_PROMPT, HISTORY_FORGET_PROMPT, THINK_LEAK_ANALYSIS_PROMPT, PERSONA_CONSISTENCY_PROMPT
     if not FACT_ERROR_PROMPT:
         FACT_ERROR_PROMPT = _get_rag_prompt("fact_error")
         ROLE_DEVIATION_PROMPT = _get_rag_prompt("role_deviation")
         HISTORY_FORGET_PROMPT = _get_rag_prompt("history_forget")
         THINK_LEAK_ANALYSIS_PROMPT = _get_rag_prompt("think_leak")
+        PERSONA_CONSISTENCY_PROMPT = _get_rag_prompt("persona_consistency")
 
 
 def get_iteration_api_config(character) -> List[Any]:
@@ -294,6 +296,42 @@ class RAGIterationManager:
         except Exception as e:
             return {"error": str(e), "api_error": True}
 
+    def export_context_for_persona_consistency(self, character_info: str, user_input: str,
+                                                bot_reply: str,
+                                                conversation_history: List[Dict]) -> str:
+        history_text = "\n".join([f"{'用户' if m['role']=='user' else '角色'}：{m['content']}"
+                                  for m in conversation_history]) if conversation_history else "无上下文"
+        return PERSONA_CONSISTENCY_PROMPT.format(
+            character_info=character_info,
+            conversation_history=history_text,
+            user_input=user_input,
+            bot_reply=bot_reply
+        )
+
+    def analyze_persona_consistency(self, character_info: str, user_input: str,
+                                     bot_reply: str,
+                                     conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        if self._cancelled.is_set():
+            return {"error": "Request cancelled due to timeout", "cancelled": True}
+        prompt = self.export_context_for_persona_consistency(
+            character_info, user_input, bot_reply, conversation_history or [])
+        try:
+            response = self._call_llm(prompt)
+            if self._cancelled.is_set():
+                return {"error": "Request cancelled due to timeout", "cancelled": True}
+            result = json.loads(_extract_json_from_response(response))
+            if isinstance(result, dict):
+                raw_confidence = result.get("confidence", 0.5)
+                try:
+                    result["confidence"] = max(0.0, min(1.0, float(raw_confidence)))
+                except (TypeError, ValueError):
+                    result["confidence"] = 0.5
+            return result
+        except json.JSONDecodeError:
+            return {"raw_response": response, "parse_error": True}
+        except Exception as e:
+            return {"error": str(e), "api_error": True}
+
     def process_feedback(self, feedback_type: str, conversation_data: Dict[str, Any],
                          character_info: str = "", rag_results: List[Dict] = None,
                          conversation_history: List[Dict] = None) -> Dict[str, Any]:
@@ -309,6 +347,8 @@ class RAGIterationManager:
             return self.analyze_history_forget(character_info, conversation_history or [], bot_reply)
         elif feedback_type == FeedbackType.THINK_LEAK.value:
             return self.analyze_think_leak(bot_reply, model_name)
+        elif feedback_type == FeedbackType.PERSONA_CONSISTENCY.value:
+            return self.analyze_persona_consistency(character_info, user_input, bot_reply, conversation_history)
         else:
             return self._analyze_general_feedback(feedback_type, conversation_data, character_info, rag_results, conversation_history)
 

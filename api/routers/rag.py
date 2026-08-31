@@ -3,6 +3,7 @@ RAG 迭代反馈与知识库路由
 """
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -143,8 +144,10 @@ async def edit_and_confirm_rag_iteration(data: RAGEditConfirmRequest, user: dict
             logger.warning("[RAG Edit] 更新建议内容失败: %s", e)
             raise HTTPException(status_code=500, detail="更新建议内容失败")
 
+    # user_id 参数是 DB 层的归属过滤条件，须传建议归属人：
+    # 管理员代为确认他人反馈时，传操作者 id 会匹配 0 行导致误报 500
     success = confirm_feedback_detail(
-        db, data.feedback_detail_id, user['user_id'])
+        db, data.feedback_detail_id, feedback_detail['user_id'])
     if not success:
         raise HTTPException(status_code=500, detail="确认失败")
 
@@ -171,8 +174,9 @@ async def confirm_rag_iteration(data: RAGConfirmRequest, user: dict = Depends(ge
     if feedback_detail.get('confirmed'):
         return {"success": True, "message": "该反馈已确认", "already_confirmed": True}
 
+    # 同上：传建议归属人，管理员代确认时不误报 500
     success = confirm_feedback_detail(
-        db, data.feedback_detail_id, user['user_id'])
+        db, data.feedback_detail_id, feedback_detail['user_id'])
     if not success:
         raise HTTPException(status_code=500, detail="确认失败")
 
@@ -249,6 +253,273 @@ async def get_conversation_feedback(conversation_id: int, user: dict = Depends(g
         "success": True,
         "feedbacks": feedbacks
     }
+
+
+# ---------------------------------------------------------------------------
+# 待确认建议收件箱（反馈闭环自动生效：auto 建议默认进入收件箱，永不直接写 RAG）
+# ---------------------------------------------------------------------------
+
+def _parse_suggestion_json(raw) -> Optional[dict]:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {"suggestion": str(parsed)}
+    except (json.JSONDecodeError, TypeError):
+        return {"suggestion": str(raw)}
+
+
+def _confidence_level(confidence: float) -> str:
+    if confidence >= 0.85:
+        return "high"
+    if confidence >= 0.6:
+        return "medium"
+    return "low"
+
+
+def _format_suggestion_item(detail: dict) -> dict:
+    parsed = _parse_suggestion_json(detail.get('correction_suggestion')) or {}
+    context_snapshot = _parse_suggestion_json(detail.get('context_snapshot')) or {}
+
+    confidence = detail.get('confidence')
+    if confidence is None:
+        confidence = parsed.get('confidence', 0.5)
+    try:
+        confidence = max(0.0, min(1.0, float(confidence)))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    return {
+        "id": detail['id'],
+        "conversation_id": detail.get('conversation_id'),
+        "feedback_type": detail.get('feedback_type'),
+        "origin": detail.get('origin', 'user'),
+        "confidence": round(confidence, 4),
+        "confidence_level": _confidence_level(confidence),
+        "suggestion_status": detail.get('suggestion_status', 'pending'),
+        "created_at": detail['created_at'].isoformat() if detail.get('created_at') else None,
+        "auto_written": bool(parsed.get('auto_written')),
+        "auto_written_trust": parsed.get('auto_written_trust'),
+        "suggestion": parsed,
+        "user_input": detail.get('conv_user_input') or context_snapshot.get('user_input', ''),
+        "bot_reply": detail.get('conv_bot_reply') or context_snapshot.get('bot_reply', ''),
+        "character": detail.get('conv_character'),
+    }
+
+
+@router.get("/api/rag/suggestions/pending")
+async def list_pending_suggestions(user: dict = Depends(get_current_user), limit: int = 50):
+    from database import get_db, get_pending_suggestions
+
+    db = get_db()
+    limit = max(1, min(limit, 200))
+    details = get_pending_suggestions(db, user_id=user['user_id'], origin='auto', limit=limit)
+
+    return {
+        "success": True,
+        "suggestions": [_format_suggestion_item(d) for d in details],
+        "total": len(details),
+    }
+
+
+@router.get("/api/rag/suggestions/stats")
+async def get_suggestions_stats(user: dict = Depends(get_current_user), scope: str = "self"):
+    from database import get_db, get_feedback_loop_stats
+
+    db = get_db()
+    if scope == "all" and user.get('role') == 'admin':
+        stats = get_feedback_loop_stats(db)
+        stats["scope"] = "all"
+    else:
+        stats = get_feedback_loop_stats(db, user_id=user['user_id'])
+        stats["scope"] = "self"
+
+    return {"success": True, "stats": stats}
+
+
+@router.get("/api/rag/suggestions/conversation/{conversation_id}")
+async def get_conversation_pending_suggestions(conversation_id: int, user: dict = Depends(get_current_user)):
+    from database import get_db, get_pending_suggestions_by_conversation, get_conversation_by_id
+
+    db = get_db()
+    conv = get_conversation_by_id(db, conversation_id)
+    ensure_conversation_access(conv, user, "对话不存在")
+
+    details = get_pending_suggestions_by_conversation(
+        db, conversation_id, user_id=user['user_id'])
+
+    return {
+        "success": True,
+        "suggestions": [_format_suggestion_item(d) for d in details],
+        "total": len(details),
+    }
+
+
+def _extract_knowledge_from_suggestion(parsed: dict, user_input: str, bot_reply: str) -> Optional[str]:
+    """从建议 JSON 提取要写入 RAG 的知识内容。"""
+    if not isinstance(parsed, dict):
+        return None
+
+    knowledge_content = None
+    if parsed.get('suggestion'):
+        deviation = parsed.get('deviation', '')
+        knowledge_content = (
+            f"画像修正: {deviation} - {parsed['suggestion']}" if deviation
+            else f"修正建议: {parsed['suggestion']}"
+        )
+    elif parsed.get('errors') and parsed['errors']:
+        first_error = parsed['errors'][0]
+        knowledge_content = f"修正: {first_error.get('content', '')} -> {first_error.get('suggestion', '')}"
+    elif parsed.get('deviations') and parsed['deviations']:
+        first_deviation = parsed['deviations'][0]
+        knowledge_content = f"角色修正: {first_deviation.get('aspect', '')} - {first_deviation.get('suggestion', '')}"
+    elif parsed.get('forgotten_points') and parsed['forgotten_points']:
+        first_point = parsed['forgotten_points'][0]
+        knowledge_content = f"记忆点: {first_point.get('point', '')}"
+    elif parsed.get('overall_suggestion'):
+        knowledge_content = parsed['overall_suggestion']
+
+    if knowledge_content and user_input and bot_reply:
+        knowledge_content = f"用户问: {user_input}\n助手答: {bot_reply}\n修正建议: {knowledge_content}"
+
+    return knowledge_content
+
+
+def _upgrade_auto_written_entry(persona_manager, feedback_detail_id: int,
+                                content: str, metadata: dict) -> bool:
+    """若该建议曾被弱权重自动写入，升级为 trust=1.0（权威性来自"谁确认"）。"""
+    try:
+        collection = persona_manager.load_persona_db()
+        existing = collection.get(
+            where={"feedback_id": feedback_detail_id}, include=["metadatas"])
+        if not existing or not existing.get("ids"):
+            return False
+
+        entry_id = existing["ids"][0]
+        merged_meta = dict(existing["metadatas"][0] or {})
+        merged_meta.update(metadata)
+        collection.update(
+            ids=[entry_id], documents=[content], metadatas=[merged_meta])
+        return True
+    except Exception as e:
+        logger.warning("[Suggestions Confirm] 升级弱权重条目失败: %s", e)
+        return False
+
+
+@router.post("/api/rag/suggestions/{feedback_detail_id}/confirm")
+async def confirm_pending_suggestion(feedback_detail_id: int, user: dict = Depends(get_current_user)):
+    from database import (
+        get_db,
+        get_feedback_detail_by_id,
+        confirm_feedback_detail,
+        update_feedback_rag_status,
+    )
+    from persona_manager import get_persona_manager
+
+    db = get_db()
+    detail = get_feedback_detail_by_id(db, feedback_detail_id)
+
+    if not detail:
+        raise HTTPException(status_code=404, detail="建议不存在")
+
+    if detail['user_id'] != user['user_id'] and user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="无权确认此建议")
+
+    status = detail.get('suggestion_status') or 'pending'
+    if status == 'confirmed':
+        return {"success": True, "message": "该建议已确认", "already_confirmed": True}
+    if status == 'rejected':
+        raise HTTPException(status_code=400, detail="该建议已被驳回，无法确认")
+
+    origin = detail.get('origin', 'user')
+    confidence = detail.get('confidence') or 1.0
+    parsed = _parse_suggestion_json(detail.get('correction_suggestion')) or {}
+    context_snapshot = _parse_suggestion_json(detail.get('context_snapshot')) or {}
+
+    user_input = context_snapshot.get('user_input', '')
+    bot_reply = context_snapshot.get('bot_reply', '')
+
+    rag_updated = False
+    upgraded_weak_entry = False
+    message = "建议已确认"
+
+    knowledge_content = _extract_knowledge_from_suggestion(parsed, user_input, bot_reply)
+    if knowledge_content:
+        try:
+            persona_manager = get_persona_manager()
+
+            # 用户确认后写入 RAG：trust=1.0，metadata 记录 origin 与 confirmed_by
+            metadata = {
+                "source": "feedback",
+                "origin": origin,
+                "trust": 1.0,
+                "confidence": confidence,
+                "feedback_id": feedback_detail_id,
+                "feedback_type": detail.get('feedback_type'),
+                "confirmed_by": "user",
+            }
+
+            upgraded_weak_entry = _upgrade_auto_written_entry(
+                persona_manager, feedback_detail_id, knowledge_content, metadata)
+            if upgraded_weak_entry:
+                rag_updated = True
+                message = "建议已确认，弱权重条目已升级为 trust=1.0"
+            else:
+                entry_id = persona_manager.add_knowledge_entry(
+                    content=knowledge_content, metadata=metadata)
+                rag_updated = True
+                message = (
+                    "建议已确认，知识条目已写入 RAG (trust=1.0)"
+                    if entry_id is not None
+                    else "建议已确认，RAG 已存在相似条目（去重跳过写入）"
+                )
+        except Exception as e:
+            logger.warning("[Suggestions Confirm] 写入 RAG 失败: %s", e)
+            message = "建议已确认，但写入 RAG 失败"
+
+    # 传建议归属人：管理员确认他人建议时，传操作者 id 会匹配 0 行误报 500
+    success = confirm_feedback_detail(db, feedback_detail_id, detail['user_id'])
+    if not success:
+        raise HTTPException(status_code=500, detail="确认失败")
+
+    if rag_updated:
+        update_feedback_rag_status(db, feedback_detail_id, True)
+
+    return {
+        "success": True,
+        "message": message,
+        "rag_updated": rag_updated,
+        "upgraded_weak_entry": upgraded_weak_entry,
+    }
+
+
+@router.post("/api/rag/suggestions/{feedback_detail_id}/reject")
+async def reject_pending_suggestion(feedback_detail_id: int, user: dict = Depends(get_current_user)):
+    from database import get_db, get_feedback_detail_by_id, reject_feedback_detail
+
+    db = get_db()
+    detail = get_feedback_detail_by_id(db, feedback_detail_id)
+
+    if not detail:
+        raise HTTPException(status_code=404, detail="建议不存在")
+
+    if detail['user_id'] != user['user_id'] and user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="无权驳回此建议")
+
+    status = detail.get('suggestion_status') or 'pending'
+    if status == 'rejected':
+        return {"success": True, "message": "该建议已驳回", "already_rejected": True}
+    if status == 'confirmed':
+        raise HTTPException(status_code=400, detail="该建议已确认，无法驳回")
+
+    # 传建议归属人：管理员驳回他人建议时，传操作者 id 会匹配 0 行误报 500
+    success = reject_feedback_detail(db, feedback_detail_id, detail['user_id'])
+    if not success:
+        raise HTTPException(status_code=500, detail="驳回失败")
+
+    return {"success": True, "message": "建议已驳回，将不会写入 RAG"}
 
 
 @router.post("/api/rag/update")
